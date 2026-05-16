@@ -165,6 +165,15 @@ class TelegramBot:
             InlineKeyboardButton("⏸ 暂停交易", callback_data=f"pause:{return_to}"),
         ]
 
+    def _trade_mode_label(self) -> str:
+        if config.real_orders_enabled:
+            return "🟢 真实下单已开启"
+        if config.auth_dry_run_enabled:
+            return "🟡 认证已配置｜影子学习/演练（不真实下单）"
+        if config.has_polymarket_creds:
+            return "🟡 密钥已配置｜真实下单未武装"
+        return "⚪ 未配置交易密钥｜不会真实下单"
+
     def control_keyboard(self, back: str = "main", include_refresh: str | None = None, refresh_label: str = "🔄 刷新") -> InlineKeyboardMarkup:
         """Consistent footer for secondary TG pages."""
         rows = []
@@ -515,7 +524,7 @@ class TelegramBot:
 
     def _build_settings_text(self) -> str:
         text = f"<b>⚙️ 设置</b>\n\n"
-        text += "交易模式: <b>实盘专用</b>（已移除模拟盘切换）\n"
+        text += f"交易模式: <b>{html.escape(self._trade_mode_label())}</b>\n"
         text += f"认证状态: <b>{'✅ 已配置' if config.has_polymarket_creds else '⛔ 未配置交易密钥'}</b>\n"
         text += f"每笔最大投注金额: <b>${config.effective_per_order_amount:.2f}</b>\n"
         if config.capital_isolation_enabled:
@@ -589,8 +598,9 @@ class TelegramBot:
 
     async def _action_removed_live_toggle(self, q):
         text = (
-            "ℹ️ 这个版本已经移除模拟盘/实盘切换。\n\n"
-            "当前是 <b>实盘专用</b>：未配置交易密钥时不会下单；配置并认证成功后按风控真实下单。\n"
+            "ℹ️ 这个版本不再用 TG 一键切换模拟/实盘。\n\n"
+            f"当前状态: <b>{html.escape(self._trade_mode_label())}</b>\n"
+            "只有同时满足 MODE=small_live/live、DRY_RUN=false、REAL_TRADING_ENABLED=true、认证成功和风控放行时，才允许真实下单。\n"
             "需要停止时请用主菜单的 ⏸ 暂停。"
         )
         await q.edit_message_text(text, reply_markup=self.settings_keyboard(), parse_mode="HTML")
@@ -1733,7 +1743,10 @@ class TelegramBot:
             return
         try:
             await asyncio.to_thread(self.polymarket.connect)
-            text = "✅ Polymarket 认证连接成功。\n\n当前为实盘专用模式；风控通过时会按 TG 设置的每笔金额真实下单。你可以点余额测试读取。"
+            if config.real_orders_enabled:
+                text = "✅ Polymarket 认证连接成功。\n\n当前真实下单已开启；仍会经过风控、Profit Rule、盘口/滑点检查后才允许提交。你可以点余额测试读取。"
+            else:
+                text = "✅ Polymarket 认证连接成功。\n\n当前真实下单未武装：只允许余额读取、行情检查、影子学习和演练，不会提交真实订单。"
         except Exception as e:
             text = f"⛔ Polymarket 认证失败：<code>{html.escape(str(e))}</code>\n\n密钥已保存，但当前不能真实下单。"
         await q.edit_message_text(text, reply_markup=self._trade_keys_keyboard(), parse_mode="HTML")
@@ -1829,7 +1842,7 @@ class TelegramBot:
 
     def _render_status(self) -> str:
         text = f"<b>🤖 Polymarket 多策略 Bot</b>\n<code>{config.VERSION}</code>\n"
-        text += "模式: 🚀 实盘专用（无模拟盘切换）\n"
+        text += f"模式: {html.escape(self._trade_mode_label())}\n"
         text += f"认证: {'✅ 已配置' if config.has_polymarket_creds else '⛔ 未配置交易密钥'} | 单笔: ${config.effective_per_order_amount:.2f}\n\n"
 
         # Risk status

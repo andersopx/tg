@@ -11,7 +11,6 @@ V6 execution changes:
 import asyncio
 import logging
 import time
-import aiohttp
 from typing import Optional, Callable
 
 from strategy import PinBarStrategy, ReversalSignal
@@ -21,6 +20,7 @@ from binance_feed import BinanceFeed, MultiAssetBinanceFeed
 from database import Database
 from learner import Learner
 from config import config
+from http_utils import client_session
 from opportunity_scorer import OpportunityScorer, strategy_name_from
 from adaptive_quality_gate import AdaptiveQualityGate
 from strategy_weight_controller import StrategyWeightController
@@ -1369,7 +1369,7 @@ class Trader:
         symbol = config.asset_symbol(asset)
         start_ms = (int(window_close_ts) - 60) * 1000
         try:
-            async with aiohttp.ClientSession() as sess:
+            async with client_session() as sess:
                 params = {
                     "symbol": symbol,
                     "interval": "1m",

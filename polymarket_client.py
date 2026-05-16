@@ -14,7 +14,7 @@ import inspect
 from types import SimpleNamespace
 from typing import Optional, Any
 
-import aiohttp
+from http_utils import client_session
 
 try:
     # Polymarket official docs now point new integrations to the CLOB V2 client.
@@ -241,7 +241,7 @@ class PolymarketClient:
 
     async def find_market_by_slug(self, slug: str) -> Optional[dict]:
         try:
-            async with aiohttp.ClientSession() as s:
+            async with client_session() as s:
                 url = f"{config.POLYMARKET_GAMMA}/markets"
                 params = {"slug": slug}
                 async with s.get(url, params=params, timeout=5) as r:
@@ -526,7 +526,7 @@ class PolymarketClient:
         if interval:
             params["interval"] = interval
         try:
-            async with aiohttp.ClientSession() as s:
+            async with client_session() as s:
                 async with s.get(f"{config.POLYMARKET_HOST}/prices-history", params=params, timeout=8) as r:
                     if r.status != 200:
                         log.warning("prices-history failed status=%s token=%s", r.status, token_id)
@@ -549,7 +549,7 @@ class PolymarketClient:
         else:
             return []
         try:
-            async with aiohttp.ClientSession() as s:
+            async with client_session() as s:
                 async with s.get(f"{config.POLYMARKET_DATA_API}/trades", params=params, timeout=8) as r:
                     if r.status != 200:
                         log.warning("data-api trades failed status=%s market=%s", r.status, condition_id or slug)
@@ -681,6 +681,16 @@ class PolymarketClient:
 
         if amount_usd < config.MIN_MARKET_ORDER_USD and order_type in ("FOK", "FAK"):
             return {"success": False, "errorMsg": f"market order amount below ${config.MIN_MARKET_ORDER_USD:.2f}"}
+
+        # Last-resort safety gate: even if a caller bypasses Trader's shadow/dry-run
+        # path and invokes the client directly, never reach post_order unless the
+        # full live arming conditions are enabled.
+        if not bool(getattr(config, "real_orders_enabled", False)):
+            return {"success": False, "errorMsg": "real_orders_disabled"}
+
+        guard_reason = self.real_submit_guard_reason()
+        if guard_reason:
+            return {"success": False, "errorMsg": guard_reason}
 
         if not self.client:
             return {"success": False, "errorMsg": "Polymarket client not authenticated/initialized"}

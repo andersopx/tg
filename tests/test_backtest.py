@@ -1,5 +1,5 @@
 import unittest
-from backtest import Candle, BacktestParams, evaluate_window, run_backtest, taker_fee_per_share, eval_index_for_seconds_left
+from backtest import Candle, BacktestParams, evaluate_window, normalize_open_time_ms, run_backtest, taker_fee_per_share, eval_index_for_seconds_left
 
 
 def make_candles(start=0, n=40, base=100000.0, step=20.0):
@@ -34,6 +34,11 @@ class BacktestCoreTests(unittest.TestCase):
         self.assertEqual(row.outcome, "UP")
         self.assertEqual(row.win, 1)
         self.assertIsNotNone(row.pnl_per_share)
+
+
+    def test_normalize_open_time_ms_handles_binance_vision_microseconds(self):
+        self.assertEqual(normalize_open_time_ms(1746057600000000), 1746057600000)
+        self.assertEqual(normalize_open_time_ms(1746057600000), 1746057600000)
 
     def test_run_backtest_finds_multiple_windows(self):
         candles = make_candles(n=80, step=15.0)

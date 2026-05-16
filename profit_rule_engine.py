@@ -668,21 +668,12 @@ def profit_rule_decision(db: Any, signal: Any, asset: str, timeframe: str, direc
         live_mode = str(mode).lower() == "live"
 
         # Live safety invariant: when PROFIT_RULE_LIVE_REQUIRE_PROMOTE=true, only
-        # PROMOTE buckets may reach real order submission. NEW/SHADOW/OBSERVE buckets
-        # are allowed to keep learning only in shadow mode.
-        # v15.1.3: PROMOTE-only blocking applies only to REAL order submission.
-        effective_live_mode = bool(
-            live_mode
-            and _env_bool("REAL_TRADING_ENABLED", False)
-            and (not _env_bool("DRY_RUN", True))
-        )
+        # PROMOTE buckets may reach live-mode submission. NEW/SHADOW/OBSERVE buckets
+        # are allowed to keep learning only when the caller explicitly uses shadow
+        # mode. This function treats mode="live" as authoritative because Trader
+        # only reaches this gate after DRY_RUN has already been cleared.
+        effective_live_mode = bool(live_mode)
         info["effective_live_mode"] = effective_live_mode
-
-        # v15.1.3: Trader may pass mode="live" after DRY_RUN=false, but when
-        # REAL_TRADING_ENABLED=false this is shadow-learning mode.
-        if (not effective_live_mode) and str(mode).lower() == "live" and _env_bool("SHADOW_TRADING_ENABLED", True):
-            mode = "shadow"
-            info["normalized_mode"] = "shadow"
 
         if effective_live_mode and cfg["live_require_promote"] and rating != "PROMOTE":
             _log_event(conn, action="blocked", mode=mode, reason="profit_rule_not_promoted_for_live", x=x, exact=exact, relaxed=relaxed, rating=rating, details=info)

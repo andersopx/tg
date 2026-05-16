@@ -71,3 +71,24 @@ def test_bet_size_runtime_write_updates_effective_amount():
     finally:
         config._runtime_state = old_runtime
         config.TEST_BET_SIZE = old_bet
+
+
+def test_tg_status_and_settings_show_actual_safety_state():
+    old = (config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY)
+    try:
+        config.MODE = "paper"
+        config.DRY_RUN = True
+        config.REAL_TRADING_ENABLED = False
+        config.OBSERVER_ONLY = False
+        bot = TelegramBot.__new__(TelegramBot)
+        bot.risk = None
+        bot.learner = None
+        bot.feed = None
+        settings = TelegramBot._build_settings_text(bot)
+        status = TelegramBot._render_status(bot)
+        assert "不会真实下单" in settings
+        assert "不会真实下单" in status
+        assert "风控真实下单" not in settings
+        assert "实盘专用" not in status
+    finally:
+        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY = old

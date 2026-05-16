@@ -22,7 +22,7 @@ except ImportError:
 from config import config
 from database import Database
 from binance_feed import BinanceFeed
-from polymarket_client import PolymarketClient, MarketOrderArgs
+from polymarket_client import PolymarketClient, MarketOrderArgs, USING_V2
 
 
 def ok(msg): print(f"✅ {msg}")
@@ -69,20 +69,27 @@ def check_packages():
             fail(f"Missing telegram package while ENABLE_TELEGRAM=true: {e}")
         else:
             warn("telegram package unavailable; okay because ENABLE_TELEGRAM=false")
-    try:
-        version = importlib_metadata.version("py-clob-client")
-        ok(f"py-clob-client version: {version}")
-    except Exception:
-        if config.real_orders_enabled or config.has_polymarket_creds:
-            errors += 1
-            fail("py-clob-client not installed; required for authenticated preflight/trading")
-        else:
-            warn("py-clob-client not installed; okay for offline/parser checks, but needed for orderbook/trading")
-    if MarketOrderArgs is not None:
-        ok("py-clob-client supports MarketOrderArgs")
+    clob_version = None
+    for dist_name in ("py-clob-client-v2", "py_clob_client_v2", "py-clob-client"):
+        try:
+            clob_version = f"{dist_name} {importlib_metadata.version(dist_name)}"
+            break
+        except Exception:
+            continue
+    if USING_V2:
+        ok(f"py-clob-client-v2 available{f' ({clob_version})' if clob_version else ''}")
+    elif clob_version:
+        warn(f"legacy py-clob-client installed ({clob_version}); CLOB v2 client is preferred")
     elif config.real_orders_enabled or config.has_polymarket_creds:
         errors += 1
-        fail("MarketOrderArgs missing; upgrade py-clob-client>=0.34.6 before authenticated staging/real trading")
+        fail("py-clob-client-v2 not installed; required for authenticated preflight/trading")
+    else:
+        warn("py-clob-client-v2 not installed; okay for offline/parser checks, but needed for orderbook/trading")
+    if MarketOrderArgs is not None:
+        ok("py-clob-client-v2 supports MarketOrderArgs")
+    elif config.real_orders_enabled or config.has_polymarket_creds:
+        errors += 1
+        fail("MarketOrderArgs missing; upgrade py-clob-client-v2 before authenticated staging/real trading")
     else:
         warn("MarketOrderArgs unavailable; real trading disabled")
     return errors
@@ -97,9 +104,11 @@ def check_parsed_market(pm, market, expected_window_ts=None):
     ok(f"Market parsed: {market.get('slug')}")
     if market.get("price_to_beat"):
         ok(f"Price to Beat parsed: ${float(market['price_to_beat']):,.2f}")
-    elif config.REQUIRE_MARKET_PRICE_TO_BEAT:
+    elif config.REQUIRE_MARKET_PRICE_TO_BEAT and not getattr(config, "PRICE_TO_BEAT_FALLBACK_ENABLED", True):
         errors += 1
         fail("Price to Beat not parsed")
+    elif config.REQUIRE_MARKET_PRICE_TO_BEAT:
+        warn("Price to Beat not parsed; runtime will require signal.reference_price fallback before trading")
     else:
         warn("Price to Beat not parsed (check disabled by config)")
     if market.get("rules_chainlink_ok"):

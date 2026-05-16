@@ -115,6 +115,24 @@ def normal_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
+
+
+def normalize_open_time_ms(value: int) -> int:
+    """Normalize Binance kline timestamps to milliseconds.
+
+    Binance REST returns millisecond open times, while recent Binance Vision CSVs
+    may use microseconds. Backtests compare Candle.ts to second timestamps, so
+    microsecond values must be scaled down or the downloaded candles are all
+    filtered out.
+    """
+    ts = int(float(value))
+    if ts >= 10_000_000_000_000_000:  # nanoseconds, defensive
+        return ts // 1_000_000
+    if ts >= 10_000_000_000_000:  # microseconds
+        return ts // 1_000
+    return ts
+
+
 def taker_fee_per_share(price: float, fee_rate: float) -> float:
     price = max(0.0, min(1.0, float(price)))
     return fee_rate * price * (1.0 - price)
@@ -149,7 +167,7 @@ def load_candles_csv(path: Path) -> List[Candle]:
             try:
                 # Binance CSV / API export format.
                 candles.append(Candle(
-                    open_time_ms=int(float(row[0])),
+                    open_time_ms=normalize_open_time_ms(row[0]),
                     open=float(row[1]),
                     high=float(row[2]),
                     low=float(row[3]),
@@ -197,7 +215,7 @@ def fetch_binance_api(symbol: str, start_ts: int, end_ts: int, cache_dir: Path, 
             break
         for row in batch:
             candles.append(Candle(
-                open_time_ms=int(row[0]),
+                open_time_ms=normalize_open_time_ms(row[0]),
                 open=float(row[1]),
                 high=float(row[2]),
                 low=float(row[3]),
@@ -252,7 +270,7 @@ def fetch_binance_vision_monthly(symbol: str, start_ts: int, end_ts: int, cache_
                         if not row or row[0].lower().startswith("open"):
                             continue
                         try:
-                            c = Candle(int(float(row[0])), float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5]))
+                            c = Candle(normalize_open_time_ms(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5]))
                             if start_ts <= c.ts < end_ts:
                                 out.append(c)
                         except Exception:
