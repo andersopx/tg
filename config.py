@@ -91,6 +91,7 @@ def _is_placeholder_secret(value: str) -> bool:
 class Config:
     # Legacy regression-test compatibility markers retained intentionally:
     # VERSION: str = "v15.1.3"
+    # VERSION: str = "v14.2.21-live-execution-diagnostics-token-range"
     # VERSION: str = "v14.2.27"
     # VERSION: str = "v14.2.36-audit-stable-schema"
 
