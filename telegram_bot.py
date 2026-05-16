@@ -808,6 +808,7 @@ class TelegramBot:
             "strategy_filters_no_match": "策略条件不够，继续观察",
             "outside_strategy_time_window": "不在进场时间窗口",
             "missing_price_to_beat": "没有安全目标价，保护跳过",
+            "missing_polymarket_price_to_beat": "缺少 Polymarket/Gamma 目标价，保护跳过",
             "orderbook_missing": "盘口暂时没有可买价",
             "orderbook_too_thin_no_fill": "盘口太薄，无法按订单大小成交",
             "orderbook_depth_insufficient": "盘口深度不足",
@@ -851,6 +852,7 @@ class TelegramBot:
             "decision_cycle_coalesced": "同一轮重复判断，已合并",
             "already_traded_window": "这个窗口已经交易过，不重复买",
             "stale_proxy_feed": "外部价格数据过期，等待刷新",
+            "stale_underlying_reference_feed": "结算参考行情过期，等待刷新",
             "market_not_found": "没有找到对应市场",
             "market_not_tradable": "市场暂不可交易",
             "market_window_mismatch": "信号窗口和市场窗口不一致",
@@ -910,6 +912,7 @@ class TelegramBot:
             "orderbook_too_thin_no_fill": "便宜的票流动性差，实际买入价远高于显示价格，已自动放弃。",
             "orderbook_depth_insufficient": "便宜的票流动性差，实际买入价远高于显示价格，已自动放弃。",
             "missing_price_to_beat": "缺少可接受最高买价；没有安全价就不下单。",
+            "missing_polymarket_price_to_beat": "Polymarket/Gamma 没给本窗口 Price-to-Beat，默认不再用外部参考价兜底。",
             "credentials_not_configured": "先到 设置 → 交易密钥 填私钥、Funder、签名类型3。",
             "client_not_authenticated": "点 重新连接认证，认证成功后才会真实下单。",
             "balance_unavailable": "余额接口没读到，机器人不会冒险下单。",
@@ -942,6 +945,7 @@ class TelegramBot:
             "decision_cycle_coalesced": "同一轮扫描里出现重复判断，系统已合并，避免刷屏和重复下单。",
             "already_traded_window": "这个 5m/15m 窗口已经交易过，机器人不会在同一窗口反复买。",
             "stale_proxy_feed": "BTC/ETH/SOL/XRP 外部价格数据太旧，等行情刷新后再判断。",
+            "stale_underlying_reference_feed": "Polymarket 盘口仍用于票价，但结算方向模型需要新鲜的底层币价/规则线，过期就不交易。",
             "market_not_found": "没有匹配到对应 Polymarket 市场，可能是窗口切换中。",
             "market_not_tradable": "市场已关闭、未激活或不可交易，不能下单。",
             "market_window_mismatch": "信号对应的时间窗口和找到的市场窗口不同，保护跳过。",
@@ -1229,7 +1233,7 @@ class TelegramBot:
             low_observe = [r for r in rows if self._is_low_value_observe(r)]
             auth_reasons = {"risk_block", "credentials_not_configured", "client_not_authenticated", "balance_unavailable"}
             auth_skip = [r for r in rows if str(r.get("action") or "") == "skip" and str(r.get("reason") or "") in auth_reasons]
-            noisy_skip_reasons = {"missing_price_to_beat", "risk_block", "credentials_not_configured", "client_not_authenticated", "balance_unavailable"}
+            noisy_skip_reasons = {"missing_price_to_beat", "missing_polymarket_price_to_beat", "stale_underlying_reference_feed", "risk_block", "credentials_not_configured", "client_not_authenticated", "balance_unavailable"}
 
             def is_high_value(r):
                 action = str(r.get("action") or "")

@@ -3,7 +3,7 @@ Configuration - all tunable parameters in one place.
 
 V12 final server guard focus:
 - Polymarket BTC 5m rule alignment: Up wins when Chainlink end >= start.
-- Binance is only a fast proxy; if Gamma exposes Price-to-Beat, use it.
+- Polymarket/Gamma is authoritative for market rules and CLOB token prices; any external crypto feed is only a Chainlink-resolution proxy.
 - Avoid fake fills, overfitted learning, and silent task failures.
 """
 import os
@@ -262,13 +262,13 @@ class Config:
     # ============ Market / resolution model ============
     MARKET_INTERVAL_SEC: int = 300
     TIE_GOES_TO_UP: bool = True
-    REFERENCE_PRICE_SOURCE: str = os.getenv("REFERENCE_PRICE_SOURCE", "binance_proxy")
+    REFERENCE_PRICE_SOURCE: str = os.getenv("REFERENCE_PRICE_SOURCE", "polymarket_gamma")
     USE_MARKET_PRICE_TO_BEAT: bool = _env_bool("USE_MARKET_PRICE_TO_BEAT", True)
     REQUIRE_MARKET_PRICE_TO_BEAT: bool = _env_bool("REQUIRE_MARKET_PRICE_TO_BEAT", True)
     # V14.2.16: If Gamma does not expose Price-to-Beat, do not hard-stop before
     # reading the live CLOB. Fall back to the signal's reference line and still
     # require orderbook/slippage/edge checks before placing a real order.
-    PRICE_TO_BEAT_FALLBACK_ENABLED: bool = _env_bool("PRICE_TO_BEAT_FALLBACK_ENABLED", True)
+    PRICE_TO_BEAT_FALLBACK_ENABLED: bool = _env_bool("PRICE_TO_BEAT_FALLBACK_ENABLED", False)
     MAX_REFERENCE_MISMATCH_USD: float = _env_float("MAX_REFERENCE_MISMATCH_USD", 150.0)
     STALE_FEED_MAX_SEC: int = _env_int("STALE_FEED_MAX_SEC", 15)
     MARKET_SLUG_SEARCH_RADIUS: int = _env_int("MARKET_SLUG_SEARCH_RADIUS", 0)  # trading uses exact 5m window by default

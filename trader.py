@@ -275,10 +275,6 @@ class Trader:
             log.info("⚠️  Skip %s: already traded this 5m window", asset)
             return self._skip(signal, "already_traded_window")
 
-        if hasattr(feed, "is_stale") and feed.is_stale(config.STALE_FEED_MAX_SEC):
-            log.info("⚠️  Skip %s: Binance proxy feed is stale", asset)
-            return self._skip(signal, "stale_proxy_feed")
-
         # In live-only builds, do not spam private balance endpoints before TG credentials
         # are saved and the client is reconnected. This is a protective skip, not a strategy failure.
         if config.real_orders_enabled and not config.has_polymarket_creds:
@@ -340,26 +336,30 @@ class Trader:
         price_to_beat_source = "gamma" if market.get("price_to_beat") else "missing"
         if config.REQUIRE_MARKET_PRICE_TO_BEAT and not market.get("price_to_beat"):
             fallback_price = float(getattr(signal, "reference_price", 0.0) or 0.0)
-            if getattr(config, "PRICE_TO_BEAT_FALLBACK_ENABLED", True) and fallback_price > 0:
+            if getattr(config, "PRICE_TO_BEAT_FALLBACK_ENABLED", False) and fallback_price > 0:
                 market["price_to_beat"] = fallback_price
                 market["price_to_beat_source"] = "signal_reference_fallback"
                 price_to_beat_source = "signal_reference_fallback"
                 log.warning(
-                    "⚠️  Gamma Price-to-Beat missing; using signal reference fallback %.4f for %s %s %s. "
-                    "Orderbook/edge/slippage checks still apply.",
+                    "⚠️  Gamma Price-to-Beat missing; using explicitly-enabled external reference fallback %.4f for %s %s %s. "
+                    "Polymarket CLOB orderbook/edge/slippage checks still apply.",
                     fallback_price, asset, timeframe, market.get("slug", "")
                 )
                 self.flight_recorder.record(
                     "price_to_beat_fallback", signal=signal, market=market, reason="signal_reference_fallback",
-                    details={"fallback_price_to_beat": fallback_price, "fallback_source": "signal.reference_price"}
+                    details={"fallback_price_to_beat": fallback_price, "fallback_source": "signal.reference_price", "explicitly_enabled": True}
                 )
             else:
-                log.info("⚠️  Skip: missing Gamma Price-to-Beat and no safe reference fallback")
-                return self._skip(signal, "missing_price_to_beat", market=market, details={"fallback_available": fallback_price > 0})
+                log.info("⚠️  Skip: Polymarket/Gamma Price-to-Beat missing; refusing external reference fallback")
+                return self._skip(signal, "missing_polymarket_price_to_beat", market=market, details={"external_fallback_available": fallback_price > 0, "fallback_enabled": bool(getattr(config, "PRICE_TO_BEAT_FALLBACK_ENABLED", False))})
 
-        # If Gamma exposes the official Price-to-Beat, use it instead of Binance proxy open.
-        # If Gamma omits it, V14.2.16 uses signal.reference_price as a fallback so the bot
-        # can still reach the live orderbook/edge/slippage guards instead of skipping early.
+        if hasattr(feed, "is_stale") and feed.is_stale(config.STALE_FEED_MAX_SEC):
+            log.info("⚠️  Skip %s: underlying reference feed is stale; Polymarket CLOB is still used for token price, but resolution-price model is not fresh", asset)
+            return self._skip(signal, "stale_underlying_reference_feed", market=market, details={"price_to_beat_source": price_to_beat_source})
+
+        # If Gamma exposes the official Price-to-Beat, use it as the authoritative market line.
+        # External reference fallback is disabled by default; if explicitly enabled, the bot
+        # still must pass live Polymarket CLOB orderbook/edge/slippage guards.
         if config.USE_MARKET_PRICE_TO_BEAT and market.get("price_to_beat"):
             adjusted = strategy_obj.reprice_signal(signal, float(market["price_to_beat"]))
             if not adjusted:
