@@ -1,22 +1,14 @@
+from config import Config
 from pathlib import Path
 
 
-def env_text():
-    p = Path(".env")
-    if p.exists():
-        return p.read_text()
-    return Path(".env.example").read_text()
-
-
-def test_v14219_execution_threshold_defaults_and_env():
-    config = Path("config.py").read_text()
-    env = env_text()
-    assert 'v14.2.21-live-execution-diagnostics-token-range' in config
-    assert 'MARKET_BUY_SLIPPAGE=0.035' in env
-    assert 'EXECUTION_GUARD_SLIPPAGE_CAP=0.035' in env
-    assert 'QUALITY_MAX_PRICE_IMPACT=0.035' in env
-    assert 'EXECUTION_GUARD_PRICE_JUMP_CAP=0.025' in env
-    assert 'TARGET_SPREAD_MAX=0.06' in env
+def test_execution_threshold_defaults_are_safe():
+    cfg = Config()
+    assert cfg.MARKET_BUY_SLIPPAGE == 0.035
+    assert cfg.EXECUTION_GUARD_SLIPPAGE_CAP == 0.035
+    assert cfg.QUALITY_MAX_PRICE_IMPACT == 0.035
+    assert cfg.EXECUTION_GUARD_PRICE_JUMP_CAP == 0.025
+    assert cfg.TARGET_SPREAD_MAX == 0.06
 
 
 def test_v14219_guard_uses_explicit_slippage_cap():

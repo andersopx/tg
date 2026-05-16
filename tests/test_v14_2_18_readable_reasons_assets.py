@@ -9,7 +9,3 @@ def test_tg_reasons_are_plain_chinese_and_include_hints():
     assert "例如 $0.99 的票" in s
     assert "各币种记录" in s
 
-
-def test_version_v14218_or_later():
-    s = Path("config.py").read_text()
-    assert 'v14.2.21-live-execution-diagnostics-token-range' in s

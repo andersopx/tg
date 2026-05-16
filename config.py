@@ -89,11 +89,6 @@ def _is_placeholder_secret(value: str) -> bool:
 
 @dataclass
 class Config:
-    # Legacy regression-test compatibility markers retained intentionally:
-    # VERSION: str = "v15.1.3"
-    # VERSION: str = "v14.2.27"
-    # VERSION: str = "v14.2.36-audit-stable-schema"
-
     # v14.2.42 Profit Rule Engine: learned rule mining, not fixed 75% only.
     PROFIT_RULE_ENGINE_ENABLED: bool = _env_bool("PROFIT_RULE_ENGINE_ENABLED", True)
     PROFIT_RULE_HARD_75_ENABLED: bool = _env_bool("PROFIT_RULE_HARD_75_ENABLED", False)
