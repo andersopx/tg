@@ -27,6 +27,8 @@ for f in "${env_files[@]}"; do
   grep -q '^REAL_TRADING_ENABLED=false$' "$f" || fail "$f must default REAL_TRADING_ENABLED=false"
   grep -q '^CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=false$' "$f" || fail "$f must default sig3 real submit=false"
   grep -q '^POLYMARKET_REPLAY_ON_START=false$' "$f" || fail "$f must default replay=false"
+  grep -q '^PRICE_TO_BEAT_FALLBACK_ENABLED=false$' "$f" || fail "$f must default price-to-beat fallback=false"
+  grep -q '^SHADOW_SETTLEMENT_EXTERNAL_FALLBACK_ENABLED=false$' "$f" || fail "$f must default shadow external settlement fallback=false"
   grep -q '^TG_BOT_TOKEN=your_telegram_bot_token_here$' "$f" || fail "$f must contain TG_BOT_TOKEN placeholder"
   grep -q '^TG_USER_ID=123456789$' "$f" || fail "$f must contain TG_USER_ID placeholder"
 done

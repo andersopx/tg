@@ -1342,13 +1342,11 @@ class Trader:
 
     # ============ Settlement ============
 
-    async def _fetch_binance_close_price_for_window(self, asset: str, window_close_ts: int) -> tuple[float | None, str]:
-        """Return the 1m Binance close immediately before a Polymarket window close.
+    async def _fetch_external_close_price_for_window(self, asset: str, window_close_ts: int) -> tuple[float | None, str]:
+        """Return an external underlying close for explicit research fallback only.
 
-        The shadow path needs a deterministic local fallback when Gamma/CLOB has
-        not yet exposed a resolved outcome.  For crypto Up/Down markets the
-        reference rule is Chainlink, but Binance close is the best local
-        approximation available to keep the learning loop from stalling.
+        Polymarket/Gamma settlement or CLOB outcome prices are preferred. This
+        external close is not platform-authoritative and is disabled by default.
         """
         asset = str(asset or "BTC").upper()
         # 1) Prefer the in-memory feed if the relevant closed kline is still there.
@@ -1363,7 +1361,7 @@ class Trader:
                 if close > 0:
                     return close, "shadow_local_feed_close"
         except Exception as e:
-            log.debug("shadow local close fallback miss asset=%s close_ts=%s error=%s", asset, window_close_ts, e)
+            log.debug("shadow external close fallback miss asset=%s close_ts=%s error=%s", asset, window_close_ts, e)
 
         # 2) REST fallback for older backlog rows outside the in-memory buffer.
         symbol = config.asset_symbol(asset)
@@ -1378,23 +1376,23 @@ class Trader:
                 }
                 async with sess.get("https://api.binance.com/api/v3/klines", params=params, timeout=8) as resp:
                     if resp.status != 200:
-                        log.warning("shadow Binance close REST failed status=%s asset=%s symbol=%s", resp.status, asset, symbol)
+                        log.warning("shadow external close REST failed status=%s asset=%s symbol=%s", resp.status, asset, symbol)
                         return None, ""
                     data = await resp.json()
                     if not data:
                         return None, ""
                     close = float(data[0][4])
-                    return (close, "shadow_binance_rest_close") if close > 0 else (None, "")
+                    return (close, "shadow_external_rest_close") if close > 0 else (None, "")
         except Exception as e:
-            log.warning("shadow Binance close REST error asset=%s symbol=%s close_ts=%s error=%s", asset, symbol, window_close_ts, e)
+            log.warning("shadow external close REST error asset=%s symbol=%s close_ts=%s error=%s", asset, symbol, window_close_ts, e)
             return None, ""
 
     async def _resolve_shadow_outcome(self, t: dict, now: int) -> tuple[str | None, float, str]:
-        """Resolve one shadow row using Gamma/CLOB first, then price fallback.
+        """Resolve one shadow row using platform data first.
 
         Returns (outcome, final_price, settlement_source). ``final_price`` is a
-        token final price (0/1) when available, or the asset close price for the
-        Binance fallback.
+        token final price (0/1) when available, or an external asset close only
+        when explicit research fallback is enabled.
         """
         market = None
         if t.get("market_slug"):
@@ -1421,9 +1419,12 @@ class Trader:
                 except Exception:
                     pass
 
-        # Fallback only after the configured grace period.  This prevents early
-        # mis-settlement but guarantees old shadow rows do not remain open forever.
+        # External fallback is disabled by default because it is not platform-authoritative.
+        # If enabled for research/backlog cleanup, wait for a grace period first to
+        # give Gamma/CLOB outcome data time to settle.
         window_close = int(t["window_ts"]) + config.timeframe_seconds(t.get("timeframe", "5m"))
+        if not bool(getattr(config, "SHADOW_SETTLEMENT_EXTERNAL_FALLBACK_ENABLED", False)):
+            return None, 0.0, ""
         fallback_after = max(int(getattr(config, "SHADOW_SETTLEMENT_BUFFER_SEC", 10) or 10),
                              int(getattr(config, "SHADOW_SETTLEMENT_FALLBACK_AFTER_SEC", 120) or 120))
         if now < window_close + fallback_after:
@@ -1446,14 +1447,14 @@ class Trader:
         if not ref or ref <= 0:
             return None, 0.0, ""
 
-        close_price, source = await self._fetch_binance_close_price_for_window(t.get("asset", "BTC"), window_close)
+        close_price, source = await self._fetch_external_close_price_for_window(t.get("asset", "BTC"), window_close)
         if close_price is None or close_price <= 0:
             return None, 0.0, ""
 
         is_up = close_price > ref
         direction = str(t.get("direction") or "").lower()
         won = (direction == "up" and is_up) or (direction == "down" and not is_up)
-        return ("win" if won else "loss"), float(close_price), source or "shadow_binance_close_fallback"
+        return ("win" if won else "loss"), float(close_price), source or "shadow_external_close_fallback"
 
     async def _settle_one_shadow_trade(self, t: dict, now: int) -> bool:
         outcome, final_price, settlement_source = await self._resolve_shadow_outcome(t, now)
@@ -1505,10 +1506,10 @@ class Trader:
         open_trades = self.db.get_open_trades()
         now = int(time.time())
 
-        # v14.2.38: Shadow settlement catch-up.  Older builds left many
+        # v14.2.38: Shadow settlement catch-up. Older builds left many
         # shadow_open rows unresolved when Gamma had not exposed final outcome
-        # yet.  We now process due rows each cycle and fall back to Binance close
-        # after a safe grace period so the learning loop completes.
+        # yet. We now process due platform-resolved rows each cycle; optional
+        # external close fallback is disabled unless explicitly enabled.
         max_shadow = max(1, int(getattr(config, "SHADOW_SETTLEMENT_MAX_PER_CYCLE", 25) or 25))
         settled_shadow = 0
         for t in self.db.get_shadow_open_trades():

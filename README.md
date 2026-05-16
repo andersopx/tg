@@ -290,7 +290,7 @@ WHERE id=?
 ```
 
 这样 `get_shadow_open_trades()` 能找到它，
-`_settle_one_shadow_trade()` 会用 Gamma/Binance 真实价格结算，
+`_settle_one_shadow_trade()` 默认只用 Gamma/CLOB 平台数据结算；外部收盘价 fallback 需要显式开启，
 真实进入复盘 + 权重学习闭环。
 
 ### Bug 2：SHADOW BUY 日志信息丢失

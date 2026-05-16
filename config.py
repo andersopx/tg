@@ -265,9 +265,8 @@ class Config:
     REFERENCE_PRICE_SOURCE: str = os.getenv("REFERENCE_PRICE_SOURCE", "polymarket_gamma")
     USE_MARKET_PRICE_TO_BEAT: bool = _env_bool("USE_MARKET_PRICE_TO_BEAT", True)
     REQUIRE_MARKET_PRICE_TO_BEAT: bool = _env_bool("REQUIRE_MARKET_PRICE_TO_BEAT", True)
-    # V14.2.16: If Gamma does not expose Price-to-Beat, do not hard-stop before
-    # reading the live CLOB. Fall back to the signal's reference line and still
-    # require orderbook/slippage/edge checks before placing a real order.
+    # If Gamma does not expose Price-to-Beat, default to a hard skip. Operators
+    # may explicitly enable fallback, but it is not platform-authoritative.
     PRICE_TO_BEAT_FALLBACK_ENABLED: bool = _env_bool("PRICE_TO_BEAT_FALLBACK_ENABLED", False)
     MAX_REFERENCE_MISMATCH_USD: float = _env_float("MAX_REFERENCE_MISMATCH_USD", 150.0)
     STALE_FEED_MAX_SEC: int = _env_int("STALE_FEED_MAX_SEC", 15)
@@ -588,6 +587,9 @@ class Config:
     SHADOW_TRADING_ON_SIGNER_GUARD: bool = _env_bool("SHADOW_TRADING_ON_SIGNER_GUARD", True)
     SHADOW_DEDUP_ENABLED: bool = _env_bool("SHADOW_DEDUP_ENABLED", True)
     SHADOW_SETTLEMENT_BUFFER_SEC: int = _env_int("SHADOW_SETTLEMENT_BUFFER_SEC", 10)
+    # Keep Shadow settlement platform-first by default. External Binance/local-feed
+    # close fallback can be explicitly enabled for research/backlog cleanup only.
+    SHADOW_SETTLEMENT_EXTERNAL_FALLBACK_ENABLED: bool = _env_bool("SHADOW_SETTLEMENT_EXTERNAL_FALLBACK_ENABLED", False)
     SHADOW_SETTLEMENT_FALLBACK_AFTER_SEC: int = _env_int("SHADOW_SETTLEMENT_FALLBACK_AFTER_SEC", 120)
     SHADOW_SETTLEMENT_MAX_PER_CYCLE: int = _env_int("SHADOW_SETTLEMENT_MAX_PER_CYCLE", 25)
     # v14.2.39: while real samples are still sparse, allow Shadow results to drive initial weights.
