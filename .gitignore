@@ -8,6 +8,7 @@ __pycache__/
 .env.*
 !.env.example
 !.env.high_win_rate.example
+!.env.ubuntu2404.example
 btc_bot.db
 btc_bot.db-*
 *.sqlite

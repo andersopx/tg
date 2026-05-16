@@ -22,6 +22,13 @@ BTC Polymarket Bot 是一个面向 Polymarket BTC 短周期市场的 Telegram �
 
 ## 2. 使用方法
 
+默认服务器系统：**Ubuntu 24.04 LTS**。
+
+本仓库已经提供两个可直接复制配置的服务器文件：
+
+- `.env.ubuntu2404.example`：Ubuntu 24.04 服务器运行配置模板，复制成 `.env` 后填写。
+- `btc-bot.service.example`：Ubuntu 24.04 systemd 服务模板，复制到 `/etc/systemd/system/btc-bot.service` 后启用。
+
 ### 2.1 服务器安装
 
 把压缩包上传到服务器 `/root/` 后执行：
@@ -43,10 +50,17 @@ START_AFTER_INSTALL=false
 
 ### 2.2 配置 `.env`
 
-新安装时可以从示例文件复制：
+新安装时优先使用 Ubuntu 24.04 专用模板：
 
 ```bash
 cd /root/btc_bot_v15_1_3
+cp .env.ubuntu2404.example .env
+nano .env
+```
+
+如果不使用 Ubuntu 24.04 专用模板，也可以使用通用模板：
+
+```bash
 cp .env.example .env
 nano .env
 ```
@@ -96,7 +110,27 @@ cd /root/btc_bot_v15_1_3
 ./.venv/bin/python server_readiness_check.py --service btc-bot --skip-network
 ```
 
-### 2.4 启动 / 停止 / 查看日志
+### 2.4 systemd 服务文件
+
+安装脚本会自动写入 systemd 服务。如果你要手动配置 Ubuntu 24.04 服务，可以直接复制模板：
+
+```bash
+cd /root/btc_bot_v15_1_3
+sudo cp btc-bot.service.example /etc/systemd/system/btc-bot.service
+sudo systemctl daemon-reload
+sudo systemctl enable btc-bot
+```
+
+模板默认路径是：
+
+```text
+WorkingDirectory=/root/btc_bot_v15_1_3
+ExecStart=/root/btc_bot_v15_1_3/.venv/bin/python /root/btc_bot_v15_1_3/main.py
+```
+
+如果你的部署目录不是 `/root/btc_bot_v15_1_3`，先修改 `btc-bot.service.example` 里的路径，再复制到 systemd。
+
+### 2.5 启动 / 停止 / 查看日志
 
 启动服务：
 
@@ -122,7 +156,7 @@ journalctl -u btc-bot -f
 systemctl stop btc-bot
 ```
 
-### 2.5 Telegram 使用
+### 2.6 Telegram 使用
 
 Telegram 里主要使用两个模式：
 
@@ -167,7 +201,7 @@ CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=true
 
 只改一个开关不够。这样设计是为了防止服务器误启动后直接真实下单。
 
-### 2.6 常用检查命令
+### 2.7 常用检查命令
 
 完整测试：
 
@@ -187,7 +221,7 @@ CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=true
 ./audit_v15_1_3.sh
 ```
 
-### 2.7 升级注意事项
+### 2.8 升级注意事项
 
 升级时安装脚本会尽量保留：
 
@@ -218,6 +252,8 @@ journalctl -u btc-bot -f
 ### v15.1.4 / 当前整理版
 
 - README 只保留三类内容：产品介绍、使用方法、升级记录。
+- 明确默认服务器系统为 Ubuntu 24.04 LTS。
+- 增加 `.env.ubuntu2404.example` 和 `btc-bot.service.example`，让服务器可以直接复制后配置。
 - 增加服务器本机体检脚本 `server_readiness_check.py`，用于检查真实服务器环境，而不是只依赖容器测试。
 - 安装脚本在写入 systemd 服务后会执行本机体检，确认服务路径和本机环境配置。
 - `audit_v15_1_3.sh` 改为更适合服务器：优先使用 `.venv`，不扫描第三方虚拟环境，不强制真实 `.env` 使用占位符。

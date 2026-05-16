@@ -16,7 +16,9 @@ fail() { echo "[FAIL] $*" >&2; exit 1; }
 [[ -f config.py ]] || fail "config.py missing"
 [[ -f install_v15_1_3.sh ]] || fail "install_v15_1_3.sh missing"
 [[ -f server_readiness_check.py ]] || fail "server_readiness_check.py missing"
+[[ -f btc-bot.service.example ]] || fail "btc-bot.service.example missing"
 [[ -f .env.example ]] || fail ".env.example missing"
+[[ -f .env.ubuntu2404.example ]] || fail ".env.ubuntu2404.example missing"
 [[ -f .env.high_win_rate.example ]] || fail ".env.high_win_rate.example missing"
 
 # Server installs often contain .venv and runtime DB files in the app directory.
@@ -37,10 +39,11 @@ fi
 grep -q 'REAL_TRADING_ENABLED: bool = _env_bool("REAL_TRADING_ENABLED", False)' config.py || fail "REAL_TRADING_ENABLED not defined safely"
 grep -q 'bool(self.REAL_TRADING_ENABLED)' config.py || fail "REAL_TRADING_ENABLED not used in real_orders_enabled"
 grep -q 'POLYMARKET_REPLAY_ON_START: bool = _env_bool("POLYMARKET_REPLAY_ON_START", False)' config.py || fail "replay default not false"
-grep -q 'cp "$APP_DIR/.env.example" "$APP_DIR/.env"' install_v15_1_3.sh || fail "installer must fall back to .env.example for fresh installs"
+grep -q 'cp "$APP_DIR/.env.ubuntu2404.example" "$APP_DIR/.env"' install_v15_1_3.sh || fail "installer must use Ubuntu 24.04 env template for fresh installs"
+grep -q 'cp "$APP_DIR/.env.example" "$APP_DIR/.env"' install_v15_1_3.sh || fail "installer must still fall back to .env.example"
 
 # Example templates must stay safe and must contain placeholders.
-for f in .env.example .env.high_win_rate.example; do
+for f in .env.example .env.high_win_rate.example .env.ubuntu2404.example; do
   grep -q '^DRY_RUN=true$' "$f" || fail "$f must default DRY_RUN=true"
   grep -q '^REAL_TRADING_ENABLED=false$' "$f" || fail "$f must default REAL_TRADING_ENABLED=false"
   grep -q '^CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=false$' "$f" || fail "$f must default sig3 real submit=false"
@@ -50,6 +53,11 @@ for f in .env.example .env.high_win_rate.example; do
   grep -q '^TG_BOT_TOKEN=your_telegram_bot_token_here$' "$f" || fail "$f must contain TG_BOT_TOKEN placeholder"
   grep -q '^TG_USER_ID=123456789$' "$f" || fail "$f must contain TG_USER_ID placeholder"
 done
+
+
+# Ubuntu 24.04 service template must be directly copyable for the default server path.
+grep -q '^WorkingDirectory=/root/btc_bot_v15_1_3$' btc-bot.service.example || fail "service template WorkingDirectory must match default Ubuntu path"
+grep -q '^ExecStart=/root/btc_bot_v15_1_3/.venv/bin/python /root/btc_bot_v15_1_3/main.py$' btc-bot.service.example || fail "service template ExecStart must match default Ubuntu path"
 
 # A real server .env should not be forced to contain placeholders. Only enforce
 # blocking safety contradictions that would make deployment misleading.

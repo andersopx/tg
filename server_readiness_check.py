@@ -110,9 +110,9 @@ def check_files(env: dict[str, str]) -> None:
     if ENV_FILE.exists():
         ok(f"找到服务器运行配置：{ENV_FILE}")
     elif EXAMPLE_FILE.exists():
-        warn("未找到 .env；这是新服务器首次部署可接受，但启动服务前必须从 .env.example 复制并填写")
+        warn("未找到 .env；这是新服务器首次部署可接受，但启动服务前必须从 .env.ubuntu2404.example 复制并填写")
     else:
-        fail("缺少 .env 且缺少 .env.example")
+        fail("缺少 .env 且缺少 .env.ubuntu2404.example / .env.example")
 
     db_path = pathlib.Path(env.get("DB_PATH", "btc_bot.db"))
     if not db_path.is_absolute():

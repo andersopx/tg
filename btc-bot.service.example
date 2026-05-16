@@ -1,0 +1,26 @@
+# Ubuntu 24.04 systemd unit for BTC Polymarket Bot.
+# Copy to /etc/systemd/system/btc-bot.service after installing the package:
+#   sudo cp btc-bot.service.example /etc/systemd/system/btc-bot.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable btc-bot
+#   sudo systemctl restart btc-bot
+
+[Unit]
+Description=BTC Polymarket Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/btc_bot_v15_1_3
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/root/btc_bot_v15_1_3
+ExecStart=/root/btc_bot_v15_1_3/.venv/bin/python /root/btc_bot_v15_1_3/main.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target
