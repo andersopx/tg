@@ -90,6 +90,17 @@ def test_trade_mode_buttons_persist_shadow_and_real_runtime_state():
             assert config.real_orders_enabled is True
             assert db.get_state("real_trading_enabled") is True
             assert db.get_state("clob_v2_sig3_real_submit_enabled") is True
+
+            TelegramBot._persist_trade_mode(bot, mode="paper", dry_run=True, real_trading=False, sig3_submit=False)
+            assert config.MODE == "paper"
+            assert config.DRY_RUN is True
+            assert config.REAL_TRADING_ENABLED is False
+            assert config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED is False
+            assert config.real_orders_enabled is False
+            assert db.get_state("mode") == "paper"
+            assert db.get_state("dry_run") is True
+            assert db.get_state("real_trading_enabled") is False
+            assert db.get_state("clob_v2_sig3_real_submit_enabled") is False
     finally:
         config._runtime_state = old_runtime
         (

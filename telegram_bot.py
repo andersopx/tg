@@ -660,10 +660,11 @@ class TelegramBot:
         await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
 
     async def _action_trade_mode_paper(self, q):
-        self._persist_trade_mode(mode="paper", dry_run=True, real_trading=False)
+        self._persist_trade_mode(mode="paper", dry_run=True, real_trading=False, sig3_submit=False)
         text = (
             "⚪ 已切换到 <b>观察/纸面模式</b>。\n\n"
-            "系统只观察和记录，不会真实下单，也不会写真实 Shadow 下单样本。"
+            "现在配置为 MODE=paper、DRY_RUN=true、REAL_TRADING_ENABLED=false。"
+            "系统只观察和纸面演练，不会调用 Polymarket post_order，也不会写入 Shadow 下单学习样本。"
         )
         await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
 

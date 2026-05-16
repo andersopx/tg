@@ -112,11 +112,13 @@ CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=true
 
 ## Telegram mode switching
 
-The Settings page exposes three runtime mode buttons:
+The Settings page exposes three runtime trade-mode buttons:
 
-- `🎭 切到影子模式`: sets `MODE=small_live`, `DRY_RUN=false`, `REAL_TRADING_ENABLED=false`. The bot runs the real market/quality/risk checks, but records accepted opportunities as local Shadow samples instead of calling Polymarket `post_order`.
+- `🎭 切到影子模式`: sets `MODE=small_live`, `DRY_RUN=false`, `REAL_TRADING_ENABLED=false`. The bot runs the real market/quality/risk checks, but records accepted opportunities as local Shadow samples instead of calling Polymarket `post_order`. Shadow settlements feed review/learning and Profit Rule statistics for later real trading.
 - `🟢 切到真实下单`: sets `MODE=small_live`, `DRY_RUN=false`, `REAL_TRADING_ENABLED=true` and reconnects Polymarket authentication when keys are present. If signature type is 3, the submit guard is also armed intentionally.
 - `⚪ 切到观察/纸面`: sets `MODE=paper`, `DRY_RUN=true`, `REAL_TRADING_ENABLED=false`. No real orders or Shadow submit samples are created.
+
+Shadow mode is not the same as observation mode: Shadow samples are settled, reviewed, and fed into conservative learning / Profit Rule statistics; those learned statistics can later gate or weight real trading, while observation mode stays paper-only and does not create Shadow learning samples.
 
 Global daily trade and order-attempt caps now default to unlimited (`MAX_TRADES_PER_DAY=0`, `MAX_ORDER_ATTEMPTS_PER_DAY=0`). Set a positive value only if you want to re-enable those daily caps.
 
