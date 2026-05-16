@@ -90,6 +90,25 @@ systemctl restart btc-bot
 journalctl -u btc-bot -f
 ```
 
+## Server deployment check
+
+不要只相信容器里的 pytest。服务器部署前，在真实服务器目录运行本机体检：
+
+```bash
+cd /root/btc_bot_v15_1_3
+./.venv/bin/python server_readiness_check.py --service btc-bot
+```
+
+这个检查会验证服务器上的 Python 版本、依赖、`.env`、数据库目录写权限、systemd `WorkingDirectory` / `ExecStart`、以及 Polymarket / Telegram / Binance 基础网络连通性。它不会下单。
+
+如果服务器临时不能访问外网，或者只想检查本机文件和 systemd 配置，可以先运行：
+
+```bash
+./.venv/bin/python server_readiness_check.py --service btc-bot --skip-network
+```
+
+`audit_v15_1_3.sh` 也已经按服务器环境调整：真实服务器 `.env` 可以使用真实 Telegram 值，不再要求 `.env` 保持示例占位符；占位符要求只适用于 `.env.example` 和 `.env.high_win_rate.example`。
+
 ## Live arming rule
 
 Real orders require **all** of these:

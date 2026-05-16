@@ -248,6 +248,9 @@ EOF
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME} >/dev/null
 
+log "执行服务器本机部署体检（不连接外网）"
+python server_readiness_check.py --service "${SERVICE_NAME}" --skip-network
+
 log "安装完成。服务名：${SERVICE_NAME}"
 log "备份目录：${BACKUP_DIR}"
 log "启动命令：systemctl restart ${SERVICE_NAME}"
