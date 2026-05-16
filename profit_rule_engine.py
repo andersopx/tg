@@ -294,7 +294,15 @@ def signature_relaxed(x: Dict[str, Any]) -> str:
 # ------------------------- database -------------------------
 
 def _connect_from_db(db: Any) -> Tuple[Optional[sqlite3.Connection], bool]:
-    """Return (conn, should_close)."""
+    """Return (conn, should_close).
+
+    ``db=None`` means "use the configured application database".  A non-None
+    object means the caller intentionally supplied a database handle/reference; if
+    it does not expose a usable connection/path, treat it as unavailable instead
+    of silently falling back to ``config.DB_PATH``.  This keeps live safety checks
+    auditable and prevents unrelated runtime files from changing a caller's
+    decision path.
+    """
     if db is None:
         _path = _config_db_path()
         if os.path.exists(_path):
@@ -308,9 +316,6 @@ def _connect_from_db(db: Any) -> Tuple[Optional[sqlite3.Connection], bool]:
         p = getattr(db, attr, None)
         if p and os.path.exists(str(p)):
             return sqlite3.connect(str(p), timeout=3.0), True
-    _path = _config_db_path()
-    if os.path.exists(_path):
-        return sqlite3.connect(_path, timeout=3.0), True
     return None, False
 
 
