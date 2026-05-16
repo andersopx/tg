@@ -3,7 +3,7 @@ Configuration - all tunable parameters in one place.
 
 V12 final server guard focus:
 - Polymarket BTC 5m rule alignment: Up wins when Chainlink end >= start.
-- Binance is only a fast proxy; if Gamma exposes Price-to-Beat, use it.
+- Polymarket/Gamma is authoritative for market rules and CLOB token prices; any external crypto feed is only a Chainlink-resolution proxy.
 - Avoid fake fills, overfitted learning, and silent task failures.
 """
 import os
@@ -89,11 +89,6 @@ def _is_placeholder_secret(value: str) -> bool:
 
 @dataclass
 class Config:
-    # Legacy regression-test compatibility markers retained intentionally:
-    # VERSION: str = "v15.1.3"
-    # VERSION: str = "v14.2.27"
-    # VERSION: str = "v14.2.36-audit-stable-schema"
-
     # v14.2.42 Profit Rule Engine: learned rule mining, not fixed 75% only.
     PROFIT_RULE_ENGINE_ENABLED: bool = _env_bool("PROFIT_RULE_ENGINE_ENABLED", True)
     PROFIT_RULE_HARD_75_ENABLED: bool = _env_bool("PROFIT_RULE_HARD_75_ENABLED", False)
@@ -237,7 +232,7 @@ class Config:
     # ============ Polymarket API ============
     POLYMARKET_PRIVATE_KEY: str = os.getenv("POLYMARKET_PRIVATE_KEY", "")
     POLYMARKET_FUNDER: str = os.getenv("POLYMARKET_FUNDER", "")
-    POLYMARKET_SIGNATURE_TYPE: int = _env_int("POLYMARKET_SIGNATURE_TYPE", 1)
+    POLYMARKET_SIGNATURE_TYPE: int = _env_int("POLYMARKET_SIGNATURE_TYPE", 3)
     POLYMARKET_HOST: str = os.getenv("POLYMARKET_HOST", "https://clob.polymarket.com")
     POLYMARKET_GAMMA: str = os.getenv("POLYMARKET_GAMMA", "https://gamma-api.polymarket.com")
     POLYMARKET_DATA_API: str = os.getenv("POLYMARKET_DATA_API", "https://data-api.polymarket.com")
@@ -267,13 +262,12 @@ class Config:
     # ============ Market / resolution model ============
     MARKET_INTERVAL_SEC: int = 300
     TIE_GOES_TO_UP: bool = True
-    REFERENCE_PRICE_SOURCE: str = os.getenv("REFERENCE_PRICE_SOURCE", "binance_proxy")
+    REFERENCE_PRICE_SOURCE: str = os.getenv("REFERENCE_PRICE_SOURCE", "polymarket_gamma")
     USE_MARKET_PRICE_TO_BEAT: bool = _env_bool("USE_MARKET_PRICE_TO_BEAT", True)
     REQUIRE_MARKET_PRICE_TO_BEAT: bool = _env_bool("REQUIRE_MARKET_PRICE_TO_BEAT", True)
-    # V14.2.16: If Gamma does not expose Price-to-Beat, do not hard-stop before
-    # reading the live CLOB. Fall back to the signal's reference line and still
-    # require orderbook/slippage/edge checks before placing a real order.
-    PRICE_TO_BEAT_FALLBACK_ENABLED: bool = _env_bool("PRICE_TO_BEAT_FALLBACK_ENABLED", True)
+    # If Gamma does not expose Price-to-Beat, default to a hard skip. Operators
+    # may explicitly enable fallback, but it is not platform-authoritative.
+    PRICE_TO_BEAT_FALLBACK_ENABLED: bool = _env_bool("PRICE_TO_BEAT_FALLBACK_ENABLED", False)
     MAX_REFERENCE_MISMATCH_USD: float = _env_float("MAX_REFERENCE_MISMATCH_USD", 150.0)
     STALE_FEED_MAX_SEC: int = _env_int("STALE_FEED_MAX_SEC", 15)
     MARKET_SLUG_SEARCH_RADIUS: int = _env_int("MARKET_SLUG_SEARCH_RADIUS", 0)  # trading uses exact 5m window by default
@@ -302,8 +296,8 @@ class Config:
     COOLDOWN_AFTER_LOSSES_SEC: int = _env_int("COOLDOWN_AFTER_LOSSES_SEC", 1800)
     BLACK_SWAN_THRESHOLD: float = _env_float("BLACK_SWAN_THRESHOLD", 0.012)
     BLACK_SWAN_WINDOW_SEC: int = _env_int("BLACK_SWAN_WINDOW_SEC", 300)
-    MAX_TRADES_PER_DAY: int = _env_int("MAX_TRADES_PER_DAY", 24)
-    MAX_ORDER_ATTEMPTS_PER_DAY: int = _env_int("MAX_ORDER_ATTEMPTS_PER_DAY", 72)
+    MAX_TRADES_PER_DAY: int = _env_int("MAX_TRADES_PER_DAY", 0)
+    MAX_ORDER_ATTEMPTS_PER_DAY: int = _env_int("MAX_ORDER_ATTEMPTS_PER_DAY", 0)
     MAX_DAILY_LOSS_USD: float = _env_float("MAX_DAILY_LOSS_USD", 12.0)
     MAX_DAILY_LOSS_PCT: float = _env_float("MAX_DAILY_LOSS_PCT", 0.12)
     MAX_OPEN_TRADES: int = _env_int("MAX_OPEN_TRADES", 3)
@@ -442,7 +436,7 @@ class Config:
 
     LOTTERY_MODE: bool = _env_bool("LOTTERY_MODE", True)
     LOTTERY_BET_SIZE: float = _env_float("LOTTERY_BET_SIZE", 1.0)
-    LOTTERY_MAX_TRADES_PER_DAY: int = _env_int("LOTTERY_MAX_TRADES_PER_DAY", 5)  # currently documented cap; global caps still apply
+    LOTTERY_MAX_TRADES_PER_DAY: int = _env_int("LOTTERY_MAX_TRADES_PER_DAY", 5)  # strategy-local cap only; global daily caps default to unlimited
     LOTTERY_MAX_DAILY_LOSS_USD: float = _env_float("LOTTERY_MAX_DAILY_LOSS_USD", 5.0)  # documented cap; global caps still apply
     LOTTERY_MIN_SECONDS_LEFT: int = _env_int("LOTTERY_MIN_SECONDS_LEFT", 8)
     LOTTERY_MAX_SECONDS_LEFT: int = _env_int("LOTTERY_MAX_SECONDS_LEFT", 55)
@@ -593,6 +587,9 @@ class Config:
     SHADOW_TRADING_ON_SIGNER_GUARD: bool = _env_bool("SHADOW_TRADING_ON_SIGNER_GUARD", True)
     SHADOW_DEDUP_ENABLED: bool = _env_bool("SHADOW_DEDUP_ENABLED", True)
     SHADOW_SETTLEMENT_BUFFER_SEC: int = _env_int("SHADOW_SETTLEMENT_BUFFER_SEC", 10)
+    # Keep Shadow settlement platform-first by default. External Binance/local-feed
+    # close fallback can be explicitly enabled for research/backlog cleanup only.
+    SHADOW_SETTLEMENT_EXTERNAL_FALLBACK_ENABLED: bool = _env_bool("SHADOW_SETTLEMENT_EXTERNAL_FALLBACK_ENABLED", False)
     SHADOW_SETTLEMENT_FALLBACK_AFTER_SEC: int = _env_int("SHADOW_SETTLEMENT_FALLBACK_AFTER_SEC", 120)
     SHADOW_SETTLEMENT_MAX_PER_CYCLE: int = _env_int("SHADOW_SETTLEMENT_MAX_PER_CYCLE", 25)
     # v14.2.39: while real samples are still sparse, allow Shadow results to drive initial weights.

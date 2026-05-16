@@ -1,20 +1,14 @@
+from config import Config
 from pathlib import Path
 
 
-def env_text():
-    p = Path(".env")
-    if p.exists():
-        return p.read_text()
-    return Path(".env.example").read_text()
-
-
-def test_v14220_high_confidence_override_present():
+def test_high_confidence_override_present():
     config = Path("config.py").read_text()
     trader = Path("trader.py").read_text()
-    env = env_text()
+    cfg = Config()
     assert "HIGH_CONFIDENCE_TOKEN_RANGE_OVERRIDE_ENABLED" in config
     assert "token_range_override_high_confidence" in trader
-    assert "REALTIME_ORDERBOOK_ENABLED=true" in env
+    assert cfg.REALTIME_ORDERBOOK_ENABLED is True
 
 
 def test_v14220_diagnostic_script_present():

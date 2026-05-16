@@ -8,7 +8,9 @@ Offline parser fixture:
 """
 import argparse
 import asyncio
+import contextlib
 import importlib
+import io
 import json
 import sys
 import time
@@ -22,7 +24,7 @@ except ImportError:
 from config import config
 from database import Database
 from binance_feed import BinanceFeed
-from polymarket_client import PolymarketClient, MarketOrderArgs
+from polymarket_client import PolymarketClient, MarketOrderArgs, USING_V2
 
 
 def ok(msg): print(f"✅ {msg}")
@@ -69,24 +71,87 @@ def check_packages():
             fail(f"Missing telegram package while ENABLE_TELEGRAM=true: {e}")
         else:
             warn("telegram package unavailable; okay because ENABLE_TELEGRAM=false")
-    try:
-        version = importlib_metadata.version("py-clob-client")
-        ok(f"py-clob-client version: {version}")
-    except Exception:
-        if config.real_orders_enabled or config.has_polymarket_creds:
-            errors += 1
-            fail("py-clob-client not installed; required for authenticated preflight/trading")
-        else:
-            warn("py-clob-client not installed; okay for offline/parser checks, but needed for orderbook/trading")
-    if MarketOrderArgs is not None:
-        ok("py-clob-client supports MarketOrderArgs")
+    clob_version = None
+    for dist_name in ("py-clob-client-v2", "py_clob_client_v2", "py-clob-client"):
+        try:
+            clob_version = f"{dist_name} {importlib_metadata.version(dist_name)}"
+            break
+        except Exception:
+            continue
+    if USING_V2:
+        ok(f"py-clob-client-v2 available{f' ({clob_version})' if clob_version else ''}")
+    elif clob_version:
+        warn(f"legacy py-clob-client installed ({clob_version}); CLOB v2 client is preferred")
     elif config.real_orders_enabled or config.has_polymarket_creds:
         errors += 1
-        fail("MarketOrderArgs missing; upgrade py-clob-client>=0.34.6 before authenticated staging/real trading")
+        fail("py-clob-client-v2 not installed; required for authenticated preflight/trading")
+    else:
+        warn("py-clob-client-v2 not installed; okay for offline/parser checks, but needed for orderbook/trading")
+    if MarketOrderArgs is not None:
+        ok("py-clob-client-v2 supports MarketOrderArgs")
+    elif config.real_orders_enabled or config.has_polymarket_creds:
+        errors += 1
+        fail("MarketOrderArgs missing; upgrade py-clob-client-v2 before authenticated staging/real trading")
     else:
         warn("MarketOrderArgs unavailable; real trading disabled")
     return errors
 
+
+
+def diagnose_signature_type_balances(db, current_sig, current_balance):
+    """Best-effort auth diagnostic for Polymarket proxy/deposit wallet modes.
+
+    A common setup mistake is using signature_type=1 for a deposit/proxy wallet
+    that actually needs signature_type=3. The CLOB API may authenticate but show
+    a zero collateral balance, which looks like an empty account. Try the other
+    signature modes in dry-run preflight and report if one sees funds.
+    """
+    try:
+        cur_bal = float(current_balance or 0.0)
+    except Exception:
+        cur_bal = 0.0
+    if cur_bal > 0 or not config.has_polymarket_creds:
+        return []
+
+    old_sig = config.POLYMARKET_SIGNATURE_TYPE
+    old_store = config.STORE_API_CREDS
+    try:
+        old_runtime_sig = db.get_state("polymarket_signature_type", None)
+    except Exception:
+        old_runtime_sig = None
+    hits = []
+    try:
+        config.STORE_API_CREDS = False
+        for sig in (0, 1, 2, 3):
+            if int(sig) == int(current_sig):
+                continue
+            try:
+                # effective_polymarket_signature_type prefers TG/SQLite runtime
+                # state over .env, so probe both sources to match server behavior.
+                config.POLYMARKET_SIGNATURE_TYPE = int(sig)
+                try:
+                    db.set_state("polymarket_signature_type", int(sig))
+                except Exception:
+                    pass
+                probe = PolymarketClient(db)
+                # The SDK prints noisy auth/api-key errors for incompatible
+                # signature modes. During probing, suppress those low-level
+                # messages and report only the actionable result below.
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    probe.connect()
+                    bal = probe.get_balance()
+                if bal is not None and float(bal) > 0:
+                    hits.append((sig, float(bal)))
+            except Exception:
+                continue
+    finally:
+        config.POLYMARKET_SIGNATURE_TYPE = old_sig
+        config.STORE_API_CREDS = old_store
+        try:
+            db.set_state("polymarket_signature_type", old_runtime_sig)
+        except Exception:
+            pass
+    return hits
 
 def check_parsed_market(pm, market, expected_window_ts=None):
     # type: (PolymarketClient, dict, Optional[int]) -> int
@@ -97,9 +162,11 @@ def check_parsed_market(pm, market, expected_window_ts=None):
     ok(f"Market parsed: {market.get('slug')}")
     if market.get("price_to_beat"):
         ok(f"Price to Beat parsed: ${float(market['price_to_beat']):,.2f}")
-    elif config.REQUIRE_MARKET_PRICE_TO_BEAT:
+    elif config.REQUIRE_MARKET_PRICE_TO_BEAT and not getattr(config, "PRICE_TO_BEAT_FALLBACK_ENABLED", True):
         errors += 1
         fail("Price to Beat not parsed")
+    elif config.REQUIRE_MARKET_PRICE_TO_BEAT:
+        warn("Price to Beat not parsed; runtime will require signal.reference_price fallback before trading")
     else:
         warn("Price to Beat not parsed (check disabled by config)")
     if market.get("rules_chainlink_ok"):
@@ -122,8 +189,9 @@ def check_parsed_market(pm, market, expected_window_ts=None):
 
 
 async def run_offline_fixture(path: str):
-    errors = check_common_config() + check_packages()
     db = Database(config.DB_PATH)
+    config.attach_runtime_state(db)
+    errors = check_common_config() + check_packages()
     pm = PolymarketClient(db)
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -140,8 +208,9 @@ async def run_offline_fixture(path: str):
 
 
 async def run_online():
-    errors = check_common_config() + check_packages()
     db = Database(config.DB_PATH)
+    config.attach_runtime_state(db)
+    errors = check_common_config() + check_packages()
     ok(f"SQLite initialized: {config.DB_PATH}")
     if db.has_api_creds():
         warn("SQLite api_credentials table contains stored credentials. Run clear_sensitive_data.py --yes")
@@ -175,8 +244,12 @@ async def run_online():
 
     if config.real_orders_enabled or config.has_polymarket_creds:
         try:
-            pm.connect()
-            bal = pm.get_balance()
+            # py-clob-client-v2 can print low-level API-key errors while trying
+            # incompatible signature modes. Keep preflight output actionable and
+            # surface failures through our own pass/fail messages instead.
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                pm.connect()
+                bal = pm.get_balance()
             if bal is None:
                 if config.DRY_RUN:
                     warn("Authenticated balance unavailable; proceeding in DRY_RUN mode")
@@ -186,7 +259,12 @@ async def run_online():
                     errors += 1
                     fail("Authenticated balance unavailable")
             else:
-                ok(f"Authenticated CLOB connection OK, collateral balance≈${bal:.2f}")
+                ok(f"Authenticated CLOB connection OK, collateral balance≈${bal:.2f} (signature_type={config.effective_polymarket_signature_type})")
+                sig_hits = diagnose_signature_type_balances(db, config.effective_polymarket_signature_type, bal)
+                if sig_hits:
+                    best_sig, best_bal = max(sig_hits, key=lambda x: x[1])
+                    errors += 1
+                    fail(f"Polymarket signature_type mismatch: configured signature_type={config.effective_polymarket_signature_type} reads $0.00, but signature_type={best_sig} sees collateral≈${best_bal:.2f}. Update POLYMARKET_SIGNATURE_TYPE/TG 签名类型 to {best_sig} before running/trading.")
                 if config.DRY_RUN:
                     ok("Authenticated dry-run confirmed: credentials work, but DRY_RUN=true blocks order submission")
         except Exception as e:

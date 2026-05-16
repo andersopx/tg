@@ -136,3 +136,23 @@ class TestV12SafetyFixes(unittest.TestCase):
             ok, reason, _ = evaluate_polymarket_replay_summary(p)
             self.assertFalse(ok)
             self.assertIn("priced_rows", reason)
+
+class TestRiskUnlimitedDailyLimits(unittest.TestCase):
+    def test_zero_daily_limits_mean_unlimited(self):
+        old = (config.MAX_TRADES_PER_DAY, config.MAX_ORDER_ATTEMPTS_PER_DAY, getattr(config, "_runtime_state", None), config.TEST_STOP_LOSS_BALANCE)
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                db = Database(os.path.join(d, "t.db"))
+                config.attach_runtime_state(db)
+                config.MAX_TRADES_PER_DAY = 0
+                config.MAX_ORDER_ATTEMPTS_PER_DAY = 0
+                config.TEST_STOP_LOSS_BALANCE = 0.0
+                db.set_state("MAX_TRADES_PER_DAY", 0)
+                db.set_state("MAX_ORDER_ATTEMPTS_PER_DAY", 0)
+                for i in range(3):
+                    db.mark_order_attempt(1778257800 + i * 300, status="failed", reason="test", asset="BTC", timeframe="5m")
+                rm = RiskManager(db, FakeFeed())
+                chk = rm.can_trade(100.0)
+                self.assertTrue(chk.can_trade, chk.reason)
+        finally:
+            config.MAX_TRADES_PER_DAY, config.MAX_ORDER_ATTEMPTS_PER_DAY, config._runtime_state, config.TEST_STOP_LOSS_BALANCE = old

@@ -5,7 +5,11 @@ cd "$APP_DIR"
 echo "=============================="
 echo "v14.3.2 runtime audit"
 echo "=============================="
-./.venv/bin/python - <<'PY'
+PYTHON_BIN="${PYTHON_BIN:-python}"
+if [[ -x "./.venv/bin/python" ]]; then
+  PYTHON_BIN="./.venv/bin/python"
+fi
+"$PYTHON_BIN" - <<'PY'
 from config import config
 keys = [
     'VERSION','MODE','DRY_RUN','ENABLE_TELEGRAM','TG_USER_ID','SHADOW_TRADING_ENABLED',
@@ -22,8 +26,12 @@ PY
 echo "=============================="
 echo "systemd"
 echo "=============================="
-systemctl cat btc-bot --no-pager | grep -E 'WorkingDirectory|ExecStart' || true
-systemctl status btc-bot --no-pager | sed -n '1,25p' || true
+if command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1; then
+  systemctl cat btc-bot --no-pager | grep -E 'WorkingDirectory|ExecStart' || true
+  systemctl status btc-bot --no-pager | sed -n '1,25p' || true
+else
+  echo "SYSTEMD_UNAVAILABLE"
+fi
 
 echo "=============================="
 echo "db tables/status"
@@ -39,4 +47,8 @@ fi
 echo "=============================="
 echo "recent logs"
 echo "=============================="
-journalctl -u btc-bot -n 120 --no-pager | grep -E 'Adaptive Edge|Profit Rule|SHADOW|ERROR|Traceback' || true
+if command -v journalctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1; then
+  journalctl -u btc-bot -n 120 --no-pager | grep -E 'Adaptive Edge|Profit Rule|SHADOW|ERROR|Traceback' || true
+else
+  echo "JOURNAL_UNAVAILABLE"
+fi

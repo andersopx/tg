@@ -1,4 +1,5 @@
 import polymarket_client as pm
+from config import config
 from polymarket_client import PolymarketClient
 
 
@@ -38,18 +39,55 @@ def test_place_buy_order_supports_sdk_that_requires_options_attributes(monkeypat
     monkeypatch.setattr(pm, "OrderType", FakeOrderType)
     monkeypatch.setattr(pm, "BUY", "BUY")
 
-    client = PolymarketClient(DummyDB())
-    client.client = FakeSdk()
-    resp = client.place_buy_order(
-        token_id="token",
-        price=0.25,
-        shares=4.0,
-        amount_usd=1.0,
-        order_type="FOK",
-        tick_size=0.01,
-        neg_risk=False,
-    )
+    old = (config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY, config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED)
+    try:
+        config.MODE = "small_live"
+        config.DRY_RUN = False
+        config.REAL_TRADING_ENABLED = True
+        config.OBSERVER_ONLY = False
+        config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED = True
+        client = PolymarketClient(DummyDB())
+        client.client = FakeSdk()
+        resp = client.place_buy_order(
+            token_id="token",
+            price=0.25,
+            shares=4.0,
+            amount_usd=1.0,
+            order_type="FOK",
+            tick_size=0.01,
+            neg_risk=False,
+        )
+    finally:
+        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY, config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED = old
 
     assert calls["tick_size"] == "0.01"
     assert resp["success"] is True
     assert resp["orderID"] == "0xabc"
+
+
+def test_place_buy_order_never_posts_when_real_orders_disabled():
+    calls = {"posted": False}
+
+    class FakeSdk:
+        def create_market_order(self, *args, **kwargs):
+            return {"signed": True}
+
+        def post_order(self, *args, **kwargs):
+            calls["posted"] = True
+            return {"success": True, "orderID": "0xunsafe"}
+
+    old = (config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY)
+    try:
+        config.MODE = "paper"
+        config.DRY_RUN = True
+        config.REAL_TRADING_ENABLED = False
+        config.OBSERVER_ONLY = False
+        client = PolymarketClient(DummyDB())
+        client.client = FakeSdk()
+        resp = client.place_buy_order("token", 0.25, 4.0, 1.0, "FOK", 0.01, False)
+    finally:
+        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY = old
+
+    assert resp["success"] is False
+    assert resp["errorMsg"] == "real_orders_disabled"
+    assert calls["posted"] is False

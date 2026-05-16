@@ -5,13 +5,14 @@ Maintains in-memory rolling windows of 1-minute klines.
 import asyncio
 import json
 import logging
+import os
 import time
 from collections import deque
 from typing import Optional
-import aiohttp
 import websockets
 
 from config import config
+from http_utils import client_session
 
 log = logging.getLogger(__name__)
 
@@ -65,11 +66,17 @@ class BinanceFeed:
     Subscribes to one Binance 1-minute kline stream.
     Keeps rolling buffer of last N closed klines + current forming kline.
     """
-    REST_URL = "https://api.binance.com/api/v3/klines"
+    DEFAULT_REST_URLS = (
+        "https://data-api.binance.vision/api/v3/klines",
+        "https://api.binance.com/api/v3/klines",
+    )
 
     def __init__(self, symbol: str = "BTCUSDT", buffer_size: int = 60):
         self.symbol = str(symbol or "BTCUSDT").upper()
-        self.ws_url = f"wss://stream.binance.com:9443/ws/{self.symbol.lower()}@kline_1m"
+        rest_urls = os.getenv("BINANCE_REST_URLS", "")
+        self.rest_urls = [u.strip() for u in rest_urls.split(",") if u.strip()] or list(self.DEFAULT_REST_URLS)
+        ws_base = os.getenv("BINANCE_WS_BASE", "wss://stream.binance.com:9443/ws").rstrip("/")
+        self.ws_url = f"{ws_base}/{self.symbol.lower()}@kline_1m"
         self.buffer_size = buffer_size
         self.klines: deque = deque(maxlen=buffer_size)
         self.current_kline: Optional[Kline] = None
@@ -79,30 +86,45 @@ class BinanceFeed:
         self._ws_task: Optional[asyncio.Task] = None
 
     async def bootstrap(self):
-        """Pre-fill buffer with recent historical klines via REST"""
-        try:
-            async with aiohttp.ClientSession() as s:
-                params = {
-                    "symbol": self.symbol,
-                    "interval": "1m",
-                    "limit": self.buffer_size
-                }
-                async with s.get(self.REST_URL, params=params, timeout=10) as r:
-                    data = await r.json()
-                    for k in data:
-                        kline = Kline(
-                            open_time=k[0],
-                            o=float(k[1]), h=float(k[2]),
-                            l=float(k[3]), c=float(k[4]),
-                            v=float(k[5]), closed=True
-                        )
-                        self.klines.append(kline)
-                    if data:
-                        self.last_price = float(data[-1][4])
-                        self.last_update_ts = time.time()
-                    log.info(f"✅ Binance feed {self.symbol} bootstrapped {len(self.klines)} klines, last price ${self.last_price:,.2f}")
-        except Exception as e:
-            log.error(f"Bootstrap failed: {e}")
+        """Pre-fill buffer with recent historical klines via REST."""
+        params = {
+            "symbol": self.symbol,
+            "interval": "1m",
+            "limit": self.buffer_size,
+        }
+        errors = []
+        async with client_session() as s:
+            for url in self.rest_urls:
+                try:
+                    async with s.get(url, params=params, timeout=10) as r:
+                        data = await r.json(content_type=None)
+                        if r.status != 200:
+                            errors.append(f"{url} status={r.status} payload={str(data)[:160]}")
+                            continue
+                        if not isinstance(data, list):
+                            errors.append(f"{url} returned non-list payload={str(data)[:160]}")
+                            continue
+                        parsed = []
+                        for k in data:
+                            if not isinstance(k, (list, tuple)) or len(k) < 6:
+                                raise ValueError(f"unexpected kline row: {str(k)[:160]}")
+                            parsed.append(Kline(
+                                open_time=int(k[0]),
+                                o=float(k[1]), h=float(k[2]),
+                                l=float(k[3]), c=float(k[4]),
+                                v=float(k[5]), closed=True,
+                            ))
+                        self.klines.clear()
+                        self.klines.extend(parsed)
+                        if parsed:
+                            self.last_price = parsed[-1].close
+                            self.last_update_ts = time.time()
+                        log.info("✅ Binance feed %s bootstrapped %s klines from %s, last price $%s",
+                                 self.symbol, len(self.klines), url, f"{self.last_price:,.2f}")
+                        return
+                except Exception as e:
+                    errors.append(f"{url} error={e}")
+        log.error("Bootstrap failed for %s: %s", self.symbol, "; ".join(errors))
 
     async def _ws_loop(self):
         """WebSocket connection with auto-reconnect"""

@@ -143,6 +143,15 @@ async def run():
     saved_dry_run = db.get_state("dry_run", None)
     if saved_dry_run is not None:
         config.DRY_RUN = bool(saved_dry_run)
+    saved_real_trading = db.get_state("real_trading_enabled", None)
+    if saved_real_trading is not None:
+        config.REAL_TRADING_ENABLED = bool(saved_real_trading)
+    saved_sig3_submit = db.get_state("clob_v2_sig3_real_submit_enabled", None)
+    if saved_sig3_submit is not None:
+        config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED = bool(saved_sig3_submit)
+    if config.MODE == "paper" or config.OBSERVER_ONLY:
+        config.DRY_RUN = True
+        config.REAL_TRADING_ENABLED = False
 
     validate_config()
 

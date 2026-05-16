@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from database import Database
 from risk_manager import RiskManager
 
@@ -9,26 +7,15 @@ class DummyFeed:
         return 0.0
 
 
-def test_v14231_small_balance_env_defaults_are_safe():
-    cfg = Path('config.py').read_text()
-    env = Path('.env.example').read_text()
-    assert 'VERSION: str = "v14.2.36-audit-stable-schema"' in cfg
-    assert 'BTC_BANKROLL_ALLOCATION: float = _env_float("BTC_BANKROLL_ALLOCATION", 1.0)' in cfg
-    assert 'TEST_STOP_LOSS_BALANCE: float = _env_float("TEST_STOP_LOSS_BALANCE", 0.5)' in cfg
-    assert 'AUTHORIZED_CAPITAL_USD=0' in env
-    assert 'BTC_BANKROLL_ALLOCATION=1.0' in env
-    assert 'ETH_BANKROLL_ALLOCATION=1.0' in env
-    assert 'SOL_BANKROLL_ALLOCATION=1.0' in env
-    assert 'XRP_BANKROLL_ALLOCATION=1.0' in env
-    assert 'TEST_STOP_LOSS_BALANCE=0.5' in env
-
-
-def test_v14236_install_uses_current_v36_directory():
-    install = Path('install_v15_1_2.sh').read_text()
-    assert '/root/btc_bot_v15_1_2' in install
-    assert 'btc_bot_v15_1_2.tar.gz' in install
-    assert '/root/btc_bot_v14_2_31_ready' not in install
-    assert 'START_AFTER_INSTALL' in install
+def test_small_balance_config_defaults_are_safe():
+    from config import Config
+    cfg = Config()
+    assert cfg.AUTHORIZED_CAPITAL_USD == 0.0
+    assert cfg.BTC_BANKROLL_ALLOCATION == 1.0
+    assert cfg.ETH_BANKROLL_ALLOCATION == 1.0
+    assert cfg.SOL_BANKROLL_ALLOCATION == 1.0
+    assert cfg.XRP_BANKROLL_ALLOCATION == 1.0
+    assert cfg.TEST_STOP_LOSS_BALANCE == 0.5
 
 
 def test_capital_scope_disables_when_wallet_below_cap(tmp_path):

@@ -11,7 +11,6 @@ V6 execution changes:
 import asyncio
 import logging
 import time
-import aiohttp
 from typing import Optional, Callable
 
 from strategy import PinBarStrategy, ReversalSignal
@@ -21,6 +20,7 @@ from binance_feed import BinanceFeed, MultiAssetBinanceFeed
 from database import Database
 from learner import Learner
 from config import config
+from http_utils import client_session
 from opportunity_scorer import OpportunityScorer, strategy_name_from
 from adaptive_quality_gate import AdaptiveQualityGate
 from strategy_weight_controller import StrategyWeightController
@@ -275,10 +275,6 @@ class Trader:
             log.info("⚠️  Skip %s: already traded this 5m window", asset)
             return self._skip(signal, "already_traded_window")
 
-        if hasattr(feed, "is_stale") and feed.is_stale(config.STALE_FEED_MAX_SEC):
-            log.info("⚠️  Skip %s: Binance proxy feed is stale", asset)
-            return self._skip(signal, "stale_proxy_feed")
-
         # In live-only builds, do not spam private balance endpoints before TG credentials
         # are saved and the client is reconnected. This is a protective skip, not a strategy failure.
         if config.real_orders_enabled and not config.has_polymarket_creds:
@@ -340,26 +336,30 @@ class Trader:
         price_to_beat_source = "gamma" if market.get("price_to_beat") else "missing"
         if config.REQUIRE_MARKET_PRICE_TO_BEAT and not market.get("price_to_beat"):
             fallback_price = float(getattr(signal, "reference_price", 0.0) or 0.0)
-            if getattr(config, "PRICE_TO_BEAT_FALLBACK_ENABLED", True) and fallback_price > 0:
+            if getattr(config, "PRICE_TO_BEAT_FALLBACK_ENABLED", False) and fallback_price > 0:
                 market["price_to_beat"] = fallback_price
                 market["price_to_beat_source"] = "signal_reference_fallback"
                 price_to_beat_source = "signal_reference_fallback"
                 log.warning(
-                    "⚠️  Gamma Price-to-Beat missing; using signal reference fallback %.4f for %s %s %s. "
-                    "Orderbook/edge/slippage checks still apply.",
+                    "⚠️  Gamma Price-to-Beat missing; using explicitly-enabled external reference fallback %.4f for %s %s %s. "
+                    "Polymarket CLOB orderbook/edge/slippage checks still apply.",
                     fallback_price, asset, timeframe, market.get("slug", "")
                 )
                 self.flight_recorder.record(
                     "price_to_beat_fallback", signal=signal, market=market, reason="signal_reference_fallback",
-                    details={"fallback_price_to_beat": fallback_price, "fallback_source": "signal.reference_price"}
+                    details={"fallback_price_to_beat": fallback_price, "fallback_source": "signal.reference_price", "explicitly_enabled": True}
                 )
             else:
-                log.info("⚠️  Skip: missing Gamma Price-to-Beat and no safe reference fallback")
-                return self._skip(signal, "missing_price_to_beat", market=market, details={"fallback_available": fallback_price > 0})
+                log.info("⚠️  Skip: Polymarket/Gamma Price-to-Beat missing; refusing external reference fallback")
+                return self._skip(signal, "missing_polymarket_price_to_beat", market=market, details={"external_fallback_available": fallback_price > 0, "fallback_enabled": bool(getattr(config, "PRICE_TO_BEAT_FALLBACK_ENABLED", False))})
 
-        # If Gamma exposes the official Price-to-Beat, use it instead of Binance proxy open.
-        # If Gamma omits it, V14.2.16 uses signal.reference_price as a fallback so the bot
-        # can still reach the live orderbook/edge/slippage guards instead of skipping early.
+        if hasattr(feed, "is_stale") and feed.is_stale(config.STALE_FEED_MAX_SEC):
+            log.info("⚠️  Skip %s: underlying reference feed is stale; Polymarket CLOB is still used for token price, but resolution-price model is not fresh", asset)
+            return self._skip(signal, "stale_underlying_reference_feed", market=market, details={"price_to_beat_source": price_to_beat_source})
+
+        # If Gamma exposes the official Price-to-Beat, use it as the authoritative market line.
+        # External reference fallback is disabled by default; if explicitly enabled, the bot
+        # still must pass live Polymarket CLOB orderbook/edge/slippage guards.
         if config.USE_MARKET_PRICE_TO_BEAT and market.get("price_to_beat"):
             adjusted = strategy_obj.reprice_signal(signal, float(market["price_to_beat"]))
             if not adjusted:
@@ -1342,13 +1342,11 @@ class Trader:
 
     # ============ Settlement ============
 
-    async def _fetch_binance_close_price_for_window(self, asset: str, window_close_ts: int) -> tuple[float | None, str]:
-        """Return the 1m Binance close immediately before a Polymarket window close.
+    async def _fetch_external_close_price_for_window(self, asset: str, window_close_ts: int) -> tuple[float | None, str]:
+        """Return an external underlying close for explicit research fallback only.
 
-        The shadow path needs a deterministic local fallback when Gamma/CLOB has
-        not yet exposed a resolved outcome.  For crypto Up/Down markets the
-        reference rule is Chainlink, but Binance close is the best local
-        approximation available to keep the learning loop from stalling.
+        Polymarket/Gamma settlement or CLOB outcome prices are preferred. This
+        external close is not platform-authoritative and is disabled by default.
         """
         asset = str(asset or "BTC").upper()
         # 1) Prefer the in-memory feed if the relevant closed kline is still there.
@@ -1363,13 +1361,13 @@ class Trader:
                 if close > 0:
                     return close, "shadow_local_feed_close"
         except Exception as e:
-            log.debug("shadow local close fallback miss asset=%s close_ts=%s error=%s", asset, window_close_ts, e)
+            log.debug("shadow external close fallback miss asset=%s close_ts=%s error=%s", asset, window_close_ts, e)
 
         # 2) REST fallback for older backlog rows outside the in-memory buffer.
         symbol = config.asset_symbol(asset)
         start_ms = (int(window_close_ts) - 60) * 1000
         try:
-            async with aiohttp.ClientSession() as sess:
+            async with client_session() as sess:
                 params = {
                     "symbol": symbol,
                     "interval": "1m",
@@ -1378,23 +1376,23 @@ class Trader:
                 }
                 async with sess.get("https://api.binance.com/api/v3/klines", params=params, timeout=8) as resp:
                     if resp.status != 200:
-                        log.warning("shadow Binance close REST failed status=%s asset=%s symbol=%s", resp.status, asset, symbol)
+                        log.warning("shadow external close REST failed status=%s asset=%s symbol=%s", resp.status, asset, symbol)
                         return None, ""
                     data = await resp.json()
                     if not data:
                         return None, ""
                     close = float(data[0][4])
-                    return (close, "shadow_binance_rest_close") if close > 0 else (None, "")
+                    return (close, "shadow_external_rest_close") if close > 0 else (None, "")
         except Exception as e:
-            log.warning("shadow Binance close REST error asset=%s symbol=%s close_ts=%s error=%s", asset, symbol, window_close_ts, e)
+            log.warning("shadow external close REST error asset=%s symbol=%s close_ts=%s error=%s", asset, symbol, window_close_ts, e)
             return None, ""
 
     async def _resolve_shadow_outcome(self, t: dict, now: int) -> tuple[str | None, float, str]:
-        """Resolve one shadow row using Gamma/CLOB first, then price fallback.
+        """Resolve one shadow row using platform data first.
 
         Returns (outcome, final_price, settlement_source). ``final_price`` is a
-        token final price (0/1) when available, or the asset close price for the
-        Binance fallback.
+        token final price (0/1) when available, or an external asset close only
+        when explicit research fallback is enabled.
         """
         market = None
         if t.get("market_slug"):
@@ -1421,9 +1419,12 @@ class Trader:
                 except Exception:
                     pass
 
-        # Fallback only after the configured grace period.  This prevents early
-        # mis-settlement but guarantees old shadow rows do not remain open forever.
+        # External fallback is disabled by default because it is not platform-authoritative.
+        # If enabled for research/backlog cleanup, wait for a grace period first to
+        # give Gamma/CLOB outcome data time to settle.
         window_close = int(t["window_ts"]) + config.timeframe_seconds(t.get("timeframe", "5m"))
+        if not bool(getattr(config, "SHADOW_SETTLEMENT_EXTERNAL_FALLBACK_ENABLED", False)):
+            return None, 0.0, ""
         fallback_after = max(int(getattr(config, "SHADOW_SETTLEMENT_BUFFER_SEC", 10) or 10),
                              int(getattr(config, "SHADOW_SETTLEMENT_FALLBACK_AFTER_SEC", 120) or 120))
         if now < window_close + fallback_after:
@@ -1446,14 +1447,14 @@ class Trader:
         if not ref or ref <= 0:
             return None, 0.0, ""
 
-        close_price, source = await self._fetch_binance_close_price_for_window(t.get("asset", "BTC"), window_close)
+        close_price, source = await self._fetch_external_close_price_for_window(t.get("asset", "BTC"), window_close)
         if close_price is None or close_price <= 0:
             return None, 0.0, ""
 
         is_up = close_price > ref
         direction = str(t.get("direction") or "").lower()
         won = (direction == "up" and is_up) or (direction == "down" and not is_up)
-        return ("win" if won else "loss"), float(close_price), source or "shadow_binance_close_fallback"
+        return ("win" if won else "loss"), float(close_price), source or "shadow_external_close_fallback"
 
     async def _settle_one_shadow_trade(self, t: dict, now: int) -> bool:
         outcome, final_price, settlement_source = await self._resolve_shadow_outcome(t, now)
@@ -1505,10 +1506,10 @@ class Trader:
         open_trades = self.db.get_open_trades()
         now = int(time.time())
 
-        # v14.2.38: Shadow settlement catch-up.  Older builds left many
+        # v14.2.38: Shadow settlement catch-up. Older builds left many
         # shadow_open rows unresolved when Gamma had not exposed final outcome
-        # yet.  We now process due rows each cycle and fall back to Binance close
-        # after a safe grace period so the learning loop completes.
+        # yet. We now process due platform-resolved rows each cycle; optional
+        # external close fallback is disabled unless explicitly enabled.
         max_shadow = max(1, int(getattr(config, "SHADOW_SETTLEMENT_MAX_PER_CYCLE", 25) or 25))
         settled_shadow = 0
         for t in self.db.get_shadow_open_trades():

@@ -165,6 +165,17 @@ class TelegramBot:
             InlineKeyboardButton("⏸ 暂停交易", callback_data=f"pause:{return_to}"),
         ]
 
+    def _trade_mode_label(self) -> str:
+        if config.real_orders_enabled:
+            return "🟢 真实下单已开启"
+        if config.MODE in {"small_live", "live"} and not config.DRY_RUN and not config.REAL_TRADING_ENABLED:
+            return "🎭 影子模式｜只记录 Shadow，不真实下单"
+        if config.auth_dry_run_enabled:
+            return "🟡 认证已配置｜纸面演练（不真实下单）"
+        if config.has_polymarket_creds:
+            return "🟡 密钥已配置｜真实下单未武装"
+        return "⚪ 未配置交易密钥｜不会真实下单"
+
     def control_keyboard(self, back: str = "main", include_refresh: str | None = None, refresh_label: str = "🔄 刷新") -> InlineKeyboardMarkup:
         """Consistent footer for secondary TG pages."""
         rows = []
@@ -177,6 +188,7 @@ class TelegramBot:
     def settings_keyboard(self) -> InlineKeyboardMarkup:
         """Compact settings menu; diagnostics moved to grouped pages."""
         kb = [
+            [InlineKeyboardButton("🎭 切到影子模式", callback_data="trade_mode_shadow"), InlineKeyboardButton("🟢 切到真实下单", callback_data="trade_mode_real")],
             [InlineKeyboardButton("💵 设置每笔金额", callback_data="set_bet_size")],
             [InlineKeyboardButton("💰 设置可用本金", callback_data="set_authorized_capital")],
             [InlineKeyboardButton("🔐 设置交易密钥", callback_data="trade_keys")],
@@ -333,6 +345,8 @@ class TelegramBot:
             "today": self._show_today,
             "balance": self._show_balance,
             "settings": self._show_settings,
+            "trade_mode_shadow": self._action_trade_mode_shadow,
+            "trade_mode_real": self._action_trade_mode_real,
             "review_menu": self._show_review_menu,
             "skip_analysis_menu": self._show_skip_analysis_menu,
             "system_health_menu": self._show_system_health_menu,
@@ -515,7 +529,8 @@ class TelegramBot:
 
     def _build_settings_text(self) -> str:
         text = f"<b>⚙️ 设置</b>\n\n"
-        text += "交易模式: <b>实盘专用</b>（已移除模拟盘切换）\n"
+        text += f"交易模式: <b>{html.escape(self._trade_mode_label())}</b>\n"
+        text += f"开关: MODE=<code>{html.escape(str(config.MODE))}</code> | DRY_RUN=<code>{str(config.DRY_RUN).lower()}</code> | REAL=<code>{str(config.REAL_TRADING_ENABLED).lower()}</code>\n"
         text += f"认证状态: <b>{'✅ 已配置' if config.has_polymarket_creds else '⛔ 未配置交易密钥'}</b>\n"
         text += f"每笔最大投注金额: <b>${config.effective_per_order_amount:.2f}</b>\n"
         if config.capital_isolation_enabled:
@@ -587,13 +602,60 @@ class TelegramBot:
 
         await q.edit_message_text(text, reply_markup=self.main_menu_keyboard(), parse_mode="HTML")
 
-    async def _action_removed_live_toggle(self, q):
+    def _persist_trade_mode(self, *, mode: str, dry_run: bool, real_trading: bool, sig3_submit: bool | None = None):
+        config.MODE = mode
+        config.DRY_RUN = bool(dry_run)
+        config.REAL_TRADING_ENABLED = bool(real_trading)
+        config.OBSERVER_ONLY = False
+        if sig3_submit is not None:
+            config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED = bool(sig3_submit)
+        self.db.set_state("mode", mode)
+        self.db.set_state("dry_run", bool(dry_run))
+        self.db.set_state("real_trading_enabled", bool(real_trading))
+        if sig3_submit is not None:
+            self.db.set_state("clob_v2_sig3_real_submit_enabled", bool(sig3_submit))
+        updates = {
+            "MODE": mode,
+            "DRY_RUN": str(bool(dry_run)).lower(),
+            "REAL_TRADING_ENABLED": str(bool(real_trading)).lower(),
+            "OBSERVER_ONLY": "false",
+        }
+        if sig3_submit is not None:
+            updates["CLOB_V2_SIG3_REAL_SUBMIT_ENABLED"] = str(bool(sig3_submit)).lower()
+        self._persist_env(updates)
+
+    async def _action_trade_mode_shadow(self, q):
+        self._persist_trade_mode(mode="small_live", dry_run=False, real_trading=False)
+        if self.risk:
+            self.risk.resume()
         text = (
-            "ℹ️ 这个版本已经移除模拟盘/实盘切换。\n\n"
-            "当前是 <b>实盘专用</b>：未配置交易密钥时不会下单；配置并认证成功后按风控真实下单。\n"
-            "需要停止时请用主菜单的 ⏸ 暂停。"
+            "✅ 已切换到 <b>影子模式</b>。\n\n"
+            "系统会继续跑完整的真实盘口/质量/风控检查，但不会调用 Polymarket post_order；"
+            "通过检查的机会会写入本地 Shadow 样本，用于复盘学习。"
         )
-        await q.edit_message_text(text, reply_markup=self.settings_keyboard(), parse_mode="HTML")
+        await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
+
+    async def _action_trade_mode_real(self, q):
+        sig3_submit = True if int(config.effective_polymarket_signature_type or 0) == 3 else None
+        self._persist_trade_mode(mode="small_live", dry_run=False, real_trading=True, sig3_submit=sig3_submit)
+        reconnect_note = ""
+        if self.polymarket and config.has_polymarket_creds:
+            try:
+                await asyncio.to_thread(self.polymarket.connect)
+                reconnect_note = "\n✅ 已重新连接 Polymarket 认证。"
+            except Exception as e:
+                reconnect_note = f"\n⚠️ 重新连接认证失败：<code>{html.escape(str(e))[:500]}</code>"
+        if self.risk:
+            self.risk.resume()
+        text = (
+            "🟢 已切换到 <b>真实下单模式</b>。\n\n"
+            "现在配置为 MODE=small_live、DRY_RUN=false、REAL_TRADING_ENABLED=true。"
+            "如果密钥、余额、风控、盘口和 Profit Rule 都通过，系统会真实调用 Polymarket 下单。"
+            f"{reconnect_note}"
+        )
+        if not config.has_polymarket_creds:
+            text += "\n\n⛔ 但当前还没有完整交易密钥，请先进入 🔐 设置交易密钥。"
+        await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
 
 
     # ============ Live switch controls ============
@@ -746,6 +808,7 @@ class TelegramBot:
             "strategy_filters_no_match": "策略条件不够，继续观察",
             "outside_strategy_time_window": "不在进场时间窗口",
             "missing_price_to_beat": "没有安全目标价，保护跳过",
+            "missing_polymarket_price_to_beat": "缺少 Polymarket/Gamma 目标价，保护跳过",
             "orderbook_missing": "盘口暂时没有可买价",
             "orderbook_too_thin_no_fill": "盘口太薄，无法按订单大小成交",
             "orderbook_depth_insufficient": "盘口深度不足",
@@ -789,6 +852,7 @@ class TelegramBot:
             "decision_cycle_coalesced": "同一轮重复判断，已合并",
             "already_traded_window": "这个窗口已经交易过，不重复买",
             "stale_proxy_feed": "外部价格数据过期，等待刷新",
+            "stale_underlying_reference_feed": "结算参考行情过期，等待刷新",
             "market_not_found": "没有找到对应市场",
             "market_not_tradable": "市场暂不可交易",
             "market_window_mismatch": "信号窗口和市场窗口不一致",
@@ -848,6 +912,7 @@ class TelegramBot:
             "orderbook_too_thin_no_fill": "便宜的票流动性差，实际买入价远高于显示价格，已自动放弃。",
             "orderbook_depth_insufficient": "便宜的票流动性差，实际买入价远高于显示价格，已自动放弃。",
             "missing_price_to_beat": "缺少可接受最高买价；没有安全价就不下单。",
+            "missing_polymarket_price_to_beat": "Polymarket/Gamma 没给本窗口 Price-to-Beat，默认不再用外部参考价兜底。",
             "credentials_not_configured": "先到 设置 → 交易密钥 填私钥、Funder、签名类型3。",
             "client_not_authenticated": "点 重新连接认证，认证成功后才会真实下单。",
             "balance_unavailable": "余额接口没读到，机器人不会冒险下单。",
@@ -880,6 +945,7 @@ class TelegramBot:
             "decision_cycle_coalesced": "同一轮扫描里出现重复判断，系统已合并，避免刷屏和重复下单。",
             "already_traded_window": "这个 5m/15m 窗口已经交易过，机器人不会在同一窗口反复买。",
             "stale_proxy_feed": "BTC/ETH/SOL/XRP 外部价格数据太旧，等行情刷新后再判断。",
+            "stale_underlying_reference_feed": "Polymarket 盘口仍用于票价，但结算方向模型需要新鲜的底层币价/规则线，过期就不交易。",
             "market_not_found": "没有匹配到对应 Polymarket 市场，可能是窗口切换中。",
             "market_not_tradable": "市场已关闭、未激活或不可交易，不能下单。",
             "market_window_mismatch": "信号对应的时间窗口和找到的市场窗口不同，保护跳过。",
@@ -1167,7 +1233,7 @@ class TelegramBot:
             low_observe = [r for r in rows if self._is_low_value_observe(r)]
             auth_reasons = {"risk_block", "credentials_not_configured", "client_not_authenticated", "balance_unavailable"}
             auth_skip = [r for r in rows if str(r.get("action") or "") == "skip" and str(r.get("reason") or "") in auth_reasons]
-            noisy_skip_reasons = {"missing_price_to_beat", "risk_block", "credentials_not_configured", "client_not_authenticated", "balance_unavailable"}
+            noisy_skip_reasons = {"missing_price_to_beat", "missing_polymarket_price_to_beat", "stale_underlying_reference_feed", "risk_block", "credentials_not_configured", "client_not_authenticated", "balance_unavailable"}
 
             def is_high_value(r):
                 action = str(r.get("action") or "")
@@ -1733,7 +1799,10 @@ class TelegramBot:
             return
         try:
             await asyncio.to_thread(self.polymarket.connect)
-            text = "✅ Polymarket 认证连接成功。\n\n当前为实盘专用模式；风控通过时会按 TG 设置的每笔金额真实下单。你可以点余额测试读取。"
+            if config.real_orders_enabled:
+                text = "✅ Polymarket 认证连接成功。\n\n当前真实下单已开启；仍会经过风控、Profit Rule、盘口/滑点检查后才允许提交。你可以点余额测试读取。"
+            else:
+                text = "✅ Polymarket 认证连接成功。\n\n当前真实下单未武装：只允许余额读取、行情检查、影子学习和演练，不会提交真实订单。"
         except Exception as e:
             text = f"⛔ Polymarket 认证失败：<code>{html.escape(str(e))}</code>\n\n密钥已保存，但当前不能真实下单。"
         await q.edit_message_text(text, reply_markup=self._trade_keys_keyboard(), parse_mode="HTML")
@@ -1829,7 +1898,7 @@ class TelegramBot:
 
     def _render_status(self) -> str:
         text = f"<b>🤖 Polymarket 多策略 Bot</b>\n<code>{config.VERSION}</code>\n"
-        text += "模式: 🚀 实盘专用（无模拟盘切换）\n"
+        text += f"模式: {html.escape(self._trade_mode_label())}\n"
         text += f"认证: {'✅ 已配置' if config.has_polymarket_creds else '⛔ 未配置交易密钥'} | 单笔: ${config.effective_per_order_amount:.2f}\n\n"
 
         # Risk status
@@ -1844,7 +1913,8 @@ class TelegramBot:
 
             if rs["consecutive_losses"] > 0:
                 text += f"⚠️ 连败: {rs['consecutive_losses']}/{config.CONSECUTIVE_LOSS_LIMIT}\n"
-            text += f"📌 开仓: {rs.get('open_trades', 0)}/{config.effective_max_open_trades} | 今日: {rs.get('today_trades', 0)}/{config.effective_max_trades_per_day}\n"
+            daily_limit = "∞" if int(config.effective_max_trades_per_day or 0) <= 0 else str(config.effective_max_trades_per_day)
+            text += f"📌 开仓: {rs.get('open_trades', 0)}/{config.effective_max_open_trades} | 今日: {rs.get('today_trades', 0)}/{daily_limit}\n"
 
         # Today stats
         if self.learner:
