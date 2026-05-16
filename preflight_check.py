@@ -8,7 +8,9 @@ Offline parser fixture:
 """
 import argparse
 import asyncio
+import contextlib
 import importlib
+import io
 import json
 import sys
 import time
@@ -132,8 +134,12 @@ def diagnose_signature_type_balances(db, current_sig, current_balance):
                 except Exception:
                     pass
                 probe = PolymarketClient(db)
-                probe.connect()
-                bal = probe.get_balance()
+                # The SDK prints noisy auth/api-key errors for incompatible
+                # signature modes. During probing, suppress those low-level
+                # messages and report only the actionable result below.
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    probe.connect()
+                    bal = probe.get_balance()
                 if bal is not None and float(bal) > 0:
                     hits.append((sig, float(bal)))
             except Exception:
@@ -238,8 +244,12 @@ async def run_online():
 
     if config.real_orders_enabled or config.has_polymarket_creds:
         try:
-            pm.connect()
-            bal = pm.get_balance()
+            # py-clob-client-v2 can print low-level API-key errors while trying
+            # incompatible signature modes. Keep preflight output actionable and
+            # surface failures through our own pass/fail messages instead.
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                pm.connect()
+                bal = pm.get_balance()
             if bal is None:
                 if config.DRY_RUN:
                     warn("Authenticated balance unavailable; proceeding in DRY_RUN mode")
@@ -253,7 +263,8 @@ async def run_online():
                 sig_hits = diagnose_signature_type_balances(db, config.effective_polymarket_signature_type, bal)
                 if sig_hits:
                     best_sig, best_bal = max(sig_hits, key=lambda x: x[1])
-                    warn(f"Configured signature_type reads zero, but signature_type={best_sig} sees collateral≈${best_bal:.2f}. Update POLYMARKET_SIGNATURE_TYPE/TG 签名类型 to {best_sig}.")
+                    errors += 1
+                    fail(f"Polymarket signature_type mismatch: configured signature_type={config.effective_polymarket_signature_type} reads $0.00, but signature_type={best_sig} sees collateral≈${best_bal:.2f}. Update POLYMARKET_SIGNATURE_TYPE/TG 签名类型 to {best_sig} before running/trading.")
                 if config.DRY_RUN:
                     ok("Authenticated dry-run confirmed: credentials work, but DRY_RUN=true blocks order submission")
         except Exception as e:
