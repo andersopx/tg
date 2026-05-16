@@ -189,7 +189,6 @@ class TelegramBot:
         """Compact settings menu; diagnostics moved to grouped pages."""
         kb = [
             [InlineKeyboardButton("🎭 切到影子模式", callback_data="trade_mode_shadow"), InlineKeyboardButton("🟢 切到真实下单", callback_data="trade_mode_real")],
-            [InlineKeyboardButton("⚪ 切到观察/纸面", callback_data="trade_mode_paper")],
             [InlineKeyboardButton("💵 设置每笔金额", callback_data="set_bet_size")],
             [InlineKeyboardButton("💰 设置可用本金", callback_data="set_authorized_capital")],
             [InlineKeyboardButton("🔐 设置交易密钥", callback_data="trade_keys")],
@@ -348,7 +347,6 @@ class TelegramBot:
             "settings": self._show_settings,
             "trade_mode_shadow": self._action_trade_mode_shadow,
             "trade_mode_real": self._action_trade_mode_real,
-            "trade_mode_paper": self._action_trade_mode_paper,
             "review_menu": self._show_review_menu,
             "skip_analysis_menu": self._show_skip_analysis_menu,
             "system_health_menu": self._show_system_health_menu,
@@ -657,15 +655,6 @@ class TelegramBot:
         )
         if not config.has_polymarket_creds:
             text += "\n\n⛔ 但当前还没有完整交易密钥，请先进入 🔐 设置交易密钥。"
-        await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
-
-    async def _action_trade_mode_paper(self, q):
-        self._persist_trade_mode(mode="paper", dry_run=True, real_trading=False, sig3_submit=False)
-        text = (
-            "⚪ 已切换到 <b>观察/纸面模式</b>。\n\n"
-            "现在配置为 MODE=paper、DRY_RUN=true、REAL_TRADING_ENABLED=false。"
-            "系统只观察和纸面演练，不会调用 Polymarket post_order，也不会写入 Shadow 下单学习样本。"
-        )
         await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
 
 
