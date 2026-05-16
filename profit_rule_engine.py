@@ -308,9 +308,10 @@ def _connect_from_db(db: Any) -> Tuple[Optional[sqlite3.Connection], bool]:
         p = getattr(db, attr, None)
         if p and os.path.exists(str(p)):
             return sqlite3.connect(str(p), timeout=3.0), True
-    _path = _config_db_path()
-    if os.path.exists(_path):
-        return sqlite3.connect(_path, timeout=3.0), True
+    # An explicit db object was provided but it did not expose a usable SQLite
+    # connection/path. Do not silently fall back to config.DB_PATH here, because
+    # that can read an unrelated runtime database and make live/shadow decisions
+    # from the wrong rule table.
     return None, False
 
 

@@ -168,8 +168,10 @@ class TelegramBot:
     def _trade_mode_label(self) -> str:
         if config.real_orders_enabled:
             return "🟢 真实下单已开启"
+        if config.MODE in {"small_live", "live"} and not config.DRY_RUN and not config.REAL_TRADING_ENABLED:
+            return "🎭 影子模式｜只记录 Shadow，不真实下单"
         if config.auth_dry_run_enabled:
-            return "🟡 认证已配置｜影子学习/演练（不真实下单）"
+            return "🟡 认证已配置｜纸面演练（不真实下单）"
         if config.has_polymarket_creds:
             return "🟡 密钥已配置｜真实下单未武装"
         return "⚪ 未配置交易密钥｜不会真实下单"
@@ -186,6 +188,8 @@ class TelegramBot:
     def settings_keyboard(self) -> InlineKeyboardMarkup:
         """Compact settings menu; diagnostics moved to grouped pages."""
         kb = [
+            [InlineKeyboardButton("🎭 切到影子模式", callback_data="trade_mode_shadow"), InlineKeyboardButton("🟢 切到真实下单", callback_data="trade_mode_real")],
+            [InlineKeyboardButton("⚪ 切到观察/纸面", callback_data="trade_mode_paper")],
             [InlineKeyboardButton("💵 设置每笔金额", callback_data="set_bet_size")],
             [InlineKeyboardButton("💰 设置可用本金", callback_data="set_authorized_capital")],
             [InlineKeyboardButton("🔐 设置交易密钥", callback_data="trade_keys")],
@@ -342,6 +346,9 @@ class TelegramBot:
             "today": self._show_today,
             "balance": self._show_balance,
             "settings": self._show_settings,
+            "trade_mode_shadow": self._action_trade_mode_shadow,
+            "trade_mode_real": self._action_trade_mode_real,
+            "trade_mode_paper": self._action_trade_mode_paper,
             "review_menu": self._show_review_menu,
             "skip_analysis_menu": self._show_skip_analysis_menu,
             "system_health_menu": self._show_system_health_menu,
@@ -525,6 +532,7 @@ class TelegramBot:
     def _build_settings_text(self) -> str:
         text = f"<b>⚙️ 设置</b>\n\n"
         text += f"交易模式: <b>{html.escape(self._trade_mode_label())}</b>\n"
+        text += f"开关: MODE=<code>{html.escape(str(config.MODE))}</code> | DRY_RUN=<code>{str(config.DRY_RUN).lower()}</code> | REAL=<code>{str(config.REAL_TRADING_ENABLED).lower()}</code>\n"
         text += f"认证状态: <b>{'✅ 已配置' if config.has_polymarket_creds else '⛔ 未配置交易密钥'}</b>\n"
         text += f"每笔最大投注金额: <b>${config.effective_per_order_amount:.2f}</b>\n"
         if config.capital_isolation_enabled:
@@ -596,14 +604,68 @@ class TelegramBot:
 
         await q.edit_message_text(text, reply_markup=self.main_menu_keyboard(), parse_mode="HTML")
 
-    async def _action_removed_live_toggle(self, q):
+    def _persist_trade_mode(self, *, mode: str, dry_run: bool, real_trading: bool, sig3_submit: bool | None = None):
+        config.MODE = mode
+        config.DRY_RUN = bool(dry_run)
+        config.REAL_TRADING_ENABLED = bool(real_trading)
+        config.OBSERVER_ONLY = False
+        if sig3_submit is not None:
+            config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED = bool(sig3_submit)
+        self.db.set_state("mode", mode)
+        self.db.set_state("dry_run", bool(dry_run))
+        self.db.set_state("real_trading_enabled", bool(real_trading))
+        if sig3_submit is not None:
+            self.db.set_state("clob_v2_sig3_real_submit_enabled", bool(sig3_submit))
+        updates = {
+            "MODE": mode,
+            "DRY_RUN": str(bool(dry_run)).lower(),
+            "REAL_TRADING_ENABLED": str(bool(real_trading)).lower(),
+            "OBSERVER_ONLY": "false",
+        }
+        if sig3_submit is not None:
+            updates["CLOB_V2_SIG3_REAL_SUBMIT_ENABLED"] = str(bool(sig3_submit)).lower()
+        self._persist_env(updates)
+
+    async def _action_trade_mode_shadow(self, q):
+        self._persist_trade_mode(mode="small_live", dry_run=False, real_trading=False)
+        if self.risk:
+            self.risk.resume()
         text = (
-            "ℹ️ 这个版本不再用 TG 一键切换模拟/实盘。\n\n"
-            f"当前状态: <b>{html.escape(self._trade_mode_label())}</b>\n"
-            "只有同时满足 MODE=small_live/live、DRY_RUN=false、REAL_TRADING_ENABLED=true、认证成功和风控放行时，才允许真实下单。\n"
-            "需要停止时请用主菜单的 ⏸ 暂停。"
+            "✅ 已切换到 <b>影子模式</b>。\n\n"
+            "系统会继续跑完整的真实盘口/质量/风控检查，但不会调用 Polymarket post_order；"
+            "通过检查的机会会写入本地 Shadow 样本，用于复盘学习。"
         )
-        await q.edit_message_text(text, reply_markup=self.settings_keyboard(), parse_mode="HTML")
+        await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
+
+    async def _action_trade_mode_real(self, q):
+        sig3_submit = True if int(config.effective_polymarket_signature_type or 0) == 3 else None
+        self._persist_trade_mode(mode="small_live", dry_run=False, real_trading=True, sig3_submit=sig3_submit)
+        reconnect_note = ""
+        if self.polymarket and config.has_polymarket_creds:
+            try:
+                await asyncio.to_thread(self.polymarket.connect)
+                reconnect_note = "\n✅ 已重新连接 Polymarket 认证。"
+            except Exception as e:
+                reconnect_note = f"\n⚠️ 重新连接认证失败：<code>{html.escape(str(e))[:500]}</code>"
+        if self.risk:
+            self.risk.resume()
+        text = (
+            "🟢 已切换到 <b>真实下单模式</b>。\n\n"
+            "现在配置为 MODE=small_live、DRY_RUN=false、REAL_TRADING_ENABLED=true。"
+            "如果密钥、余额、风控、盘口和 Profit Rule 都通过，系统会真实调用 Polymarket 下单。"
+            f"{reconnect_note}"
+        )
+        if not config.has_polymarket_creds:
+            text += "\n\n⛔ 但当前还没有完整交易密钥，请先进入 🔐 设置交易密钥。"
+        await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
+
+    async def _action_trade_mode_paper(self, q):
+        self._persist_trade_mode(mode="paper", dry_run=True, real_trading=False)
+        text = (
+            "⚪ 已切换到 <b>观察/纸面模式</b>。\n\n"
+            "系统只观察和记录，不会真实下单，也不会写真实 Shadow 下单样本。"
+        )
+        await q.edit_message_text(text + "\n\n" + self._build_settings_text(), reply_markup=self.settings_keyboard(), parse_mode="HTML")
 
 
     # ============ Live switch controls ============
@@ -1857,7 +1919,8 @@ class TelegramBot:
 
             if rs["consecutive_losses"] > 0:
                 text += f"⚠️ 连败: {rs['consecutive_losses']}/{config.CONSECUTIVE_LOSS_LIMIT}\n"
-            text += f"📌 开仓: {rs.get('open_trades', 0)}/{config.effective_max_open_trades} | 今日: {rs.get('today_trades', 0)}/{config.effective_max_trades_per_day}\n"
+            daily_limit = "∞" if int(config.effective_max_trades_per_day or 0) <= 0 else str(config.effective_max_trades_per_day)
+            text += f"📌 开仓: {rs.get('open_trades', 0)}/{config.effective_max_open_trades} | 今日: {rs.get('today_trades', 0)}/{daily_limit}\n"
 
         # Today stats
         if self.learner:

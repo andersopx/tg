@@ -60,8 +60,8 @@ append_missing DAILY_PROFIT_LOCK_GIVEBACK_PCT 0.45
 append_missing BACKTEST_REQUIRED_BEFORE_LIVE true
 append_missing BACKTEST_MIN_WIN_RATE 0.60
 append_missing MAX_OPEN_TRADES 1
-append_missing MAX_TRADES_PER_DAY 24
-append_missing MAX_ORDER_ATTEMPTS_PER_DAY 72
+append_missing MAX_TRADES_PER_DAY 0
+append_missing MAX_ORDER_ATTEMPTS_PER_DAY 0
 append_missing CONSECUTIVE_LOSS_LIMIT 3
 append_missing COOLDOWN_AFTER_LOSSES_SEC 1800
 append_missing MIN_MARKET_ORDER_USD 1.0

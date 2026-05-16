@@ -110,37 +110,15 @@ For signature type 3 / proxy wallet real submission, this must also be intention
 CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=true
 ```
 
-## Manual one-dollar order attempt
+## Telegram mode switching
 
-Use `one_dollar_order.py` when you want to test the live CLOB submit path with exactly **$1.00** without waiting for the strategy loop. The command previews by default and does **not** submit unless `--yes` is present:
+The Settings page exposes three runtime mode buttons:
 
-```bash
-python3 one_dollar_order.py --asset BTC --timeframe 5m --side auto
-```
+- `🎭 切到影子模式`: sets `MODE=small_live`, `DRY_RUN=false`, `REAL_TRADING_ENABLED=false`. The bot runs the real market/quality/risk checks, but records accepted opportunities as local Shadow samples instead of calling Polymarket `post_order`.
+- `🟢 切到真实下单`: sets `MODE=small_live`, `DRY_RUN=false`, `REAL_TRADING_ENABLED=true` and reconnects Polymarket authentication when keys are present. If signature type is 3, the submit guard is also armed intentionally.
+- `⚪ 切到观察/纸面`: sets `MODE=paper`, `DRY_RUN=true`, `REAL_TRADING_ENABLED=false`. No real orders or Shadow submit samples are created.
 
-To submit one real $1 FOK/FAK BUY, first enable every live arming switch above and confirm wallet credentials/balance, then run:
-
-```bash
-python3 one_dollar_order.py --asset BTC --timeframe 5m --side auto --yes
-```
-
-If you want the backend service itself to try one real $1 order immediately after startup, add these explicit settings before restarting the service:
-
-```env
-ONE_DOLLAR_ORDER_ON_START=true
-ONE_DOLLAR_ORDER_ASSET=BTC
-ONE_DOLLAR_ORDER_TIMEFRAME=5m
-ONE_DOLLAR_ORDER_SIDE=auto
-```
-
-The startup hook runs once per process start. If any live arming switch or the signature-type-3 submit guard is still off, the log will show `One-dollar startup order did not submit` with the exact blocking reason.
-
-Safety behavior:
-
-- The amount is fixed at `$1.00`; it uses `MIN_MARKET_ORDER_USD=1.0` and the configured `ORDER_TYPE` unless `--order-type FOK|FAK` is supplied.
-- `--side auto` chooses the cheaper visible Up/Down ask; you can force `--side up` or `--side down`.
-- The script still refuses to submit unless `MODE=small_live|live`, `DRY_RUN=false`, `REAL_TRADING_ENABLED=true`, and `OBSERVER_ONLY=false`.
-- If a manual order is matched, it is inserted into `trades` with `status='filled'` so normal settlement can track it.
+Global daily trade and order-attempt caps now default to unlimited (`MAX_TRADES_PER_DAY=0`, `MAX_ORDER_ATTEMPTS_PER_DAY=0`). Set a positive value only if you want to re-enable those daily caps.
 
 ## Short-cycle automation goal
 

@@ -129,12 +129,14 @@ class RiskManager:
         if self.db.count_open_trades() >= config.effective_max_open_trades:
             return RiskCheck(False, f"Open-trade limit reached ({config.effective_max_open_trades})", "warning")
 
-        if self.db.get_today_trade_count() >= config.effective_max_trades_per_day:
-            return RiskCheck(False, f"Daily trade limit reached ({config.effective_max_trades_per_day})", "warning")
+        max_trades = int(config.effective_max_trades_per_day or 0)
+        if max_trades > 0 and self.db.get_today_trade_count() >= max_trades:
+            return RiskCheck(False, f"Daily trade limit reached ({max_trades})", "warning")
 
+        max_attempts = int(config.effective_max_order_attempts_per_day or 0)
         attempts_today = self.db.get_today_order_attempt_count()
-        if attempts_today >= config.effective_max_order_attempts_per_day:
-            return RiskCheck(False, f"Daily order-attempt limit reached ({config.effective_max_order_attempts_per_day})", "warning")
+        if max_attempts > 0 and attempts_today >= max_attempts:
+            return RiskCheck(False, f"Daily order-attempt limit reached ({max_attempts})", "warning")
 
         today_pnl = self.db.get_today_realized_pnl()
         loss_caps = []

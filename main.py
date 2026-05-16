@@ -143,6 +143,15 @@ async def run():
     saved_dry_run = db.get_state("dry_run", None)
     if saved_dry_run is not None:
         config.DRY_RUN = bool(saved_dry_run)
+    saved_real_trading = db.get_state("real_trading_enabled", None)
+    if saved_real_trading is not None:
+        config.REAL_TRADING_ENABLED = bool(saved_real_trading)
+    saved_sig3_submit = db.get_state("clob_v2_sig3_real_submit_enabled", None)
+    if saved_sig3_submit is not None:
+        config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED = bool(saved_sig3_submit)
+    if config.MODE == "paper" or config.OBSERVER_ONLY:
+        config.DRY_RUN = True
+        config.REAL_TRADING_ENABLED = False
 
     validate_config()
 
@@ -250,7 +259,6 @@ async def run():
     ws_cleanup_task = asyncio.create_task(ws_subscription_cleanup_loop(db, market_ws)) if market_ws else None
     data_collector = DataCollector(db, polymarket, feed) if config.ENABLE_DATA_RECORDER else None
     data_task = asyncio.create_task(data_collector.run()) if data_collector else None
-    one_dollar_task = asyncio.create_task(one_dollar_order_startup_task(db, polymarket)) if config.ONE_DOLLAR_ORDER_ON_START else None
 
     await stop_event.wait()
 
@@ -267,15 +275,12 @@ async def run():
         data_collector.stop()
     if data_task:
         data_task.cancel()
-    if one_dollar_task and not one_dollar_task.done():
-        one_dollar_task.cancel()
 
     await asyncio.gather(
         trader_task, daily_task,
         *( [doctor_task] if doctor_task else [] ),
         *( [ws_cleanup_task] if ws_cleanup_task else [] ),
         *( [data_task] if data_task else [] ),
-        *( [one_dollar_task] if one_dollar_task else [] ),
         return_exceptions=True,
     )
     await feed.stop()
@@ -312,35 +317,6 @@ async def run_observer_only(db: Database, polymarket: PolymarketClient, feed: Bi
     if market_ws:
         await market_ws.stop()
     log.info("Observer-only shutdown complete")
-
-async def one_dollar_order_startup_task(db: Database, polymarket: PolymarketClient):
-    """Attempt exactly one manual $1 order from backend startup when explicitly enabled."""
-    try:
-        from one_dollar_order import attempt_one_dollar_order
-
-        log.warning(
-            "ONE_DOLLAR_ORDER_ON_START=true: attempting one real $1 order asset=%s timeframe=%s side=%s",
-            config.ONE_DOLLAR_ORDER_ASSET, config.ONE_DOLLAR_ORDER_TIMEFRAME, config.ONE_DOLLAR_ORDER_SIDE,
-        )
-        result = await attempt_one_dollar_order(
-            db, polymarket,
-            asset=config.ONE_DOLLAR_ORDER_ASSET,
-            timeframe=config.ONE_DOLLAR_ORDER_TIMEFRAME,
-            side=config.ONE_DOLLAR_ORDER_SIDE,
-            allow_nearby=config.ONE_DOLLAR_ORDER_ALLOW_NEARBY,
-            order_type=config.ORDER_TYPE,
-            submit=True,
-            connect_for_submit=False,
-        )
-        if result.get("submitted") and result.get("ok"):
-            log.warning("✅ One-dollar startup order submitted: %s", result)
-        else:
-            log.error("⛔ One-dollar startup order did not submit: %s", result)
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        log.exception("One-dollar startup order attempt failed: %s", e)
-
 
 async def product_doctor_loop(tg, doctor: ProductDoctor):
     """Periodically run product self-diagnosis and push warning-level findings."""

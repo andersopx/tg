@@ -91,9 +91,10 @@ class AdaptiveQualityGate:
         now = datetime.now(timezone.utc)
         seconds_today = now.hour * 3600 + now.minute * 60 + now.second
         hours_elapsed = max(0.05, seconds_today / 3600.0)
-        max_daily = max(1, int(config.MAX_TRADES_PER_DAY))
-        target_hourly = float(config.TARGET_TRADES_PER_HOUR or (max_daily / 24.0))
-        target_so_far = min(float(max_daily), max(1.0, hours_elapsed * target_hourly))
+        max_daily = int(getattr(config, "effective_max_trades_per_day", config.MAX_TRADES_PER_DAY) or 0)
+        target_hourly = float(config.TARGET_TRADES_PER_HOUR or ((max_daily / 24.0) if max_daily > 0 else 1.0))
+        raw_target_so_far = max(1.0, hours_elapsed * target_hourly)
+        target_so_far = min(float(max_daily), raw_target_so_far) if max_daily > 0 else raw_target_so_far
         trades = 0
         pnl = 0.0
         losses = 0

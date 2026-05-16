@@ -15,7 +15,9 @@ def test_settings_keyboard_is_live_only_and_has_runtime_money_controls():
     assert "💵 设置每笔金额" in labels
     assert "💰 设置可用本金" in labels
     assert "🔐 设置交易密钥" in labels
-    assert not any("模拟" in x or "DRY" in x or "切回" in x or "开启小额实盘" in x for x in labels)
+    assert "🎭 切到影子模式" in labels
+    assert "🟢 切到真实下单" in labels
+    assert "⚪ 切到观察/纸面" in labels
 
 
 def test_bet_size_runtime_write_updates_effective_amount():
@@ -56,3 +58,41 @@ def test_tg_status_and_settings_show_actual_safety_state():
         assert "实盘专用" not in status
     finally:
         config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY = old
+
+
+def test_trade_mode_buttons_persist_shadow_and_real_runtime_state():
+    old_runtime = getattr(config, "_runtime_state", None)
+    old = (
+        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED,
+        config.OBSERVER_ONLY, config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED,
+    )
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            db = Database(tmp.name)
+            config.attach_runtime_state(db)
+            bot = TelegramBot.__new__(TelegramBot)
+            bot.db = db
+            bot.risk = None
+            bot.polymarket = None
+
+            TelegramBot._persist_trade_mode(bot, mode="small_live", dry_run=False, real_trading=False)
+            assert config.MODE == "small_live"
+            assert config.DRY_RUN is False
+            assert config.REAL_TRADING_ENABLED is False
+            assert config.real_orders_enabled is False
+            assert db.get_state("mode") == "small_live"
+            assert db.get_state("dry_run") is False
+            assert db.get_state("real_trading_enabled") is False
+
+            TelegramBot._persist_trade_mode(bot, mode="small_live", dry_run=False, real_trading=True, sig3_submit=True)
+            assert config.REAL_TRADING_ENABLED is True
+            assert config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED is True
+            assert config.real_orders_enabled is True
+            assert db.get_state("real_trading_enabled") is True
+            assert db.get_state("clob_v2_sig3_real_submit_enabled") is True
+    finally:
+        config._runtime_state = old_runtime
+        (
+            config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED,
+            config.OBSERVER_ONLY, config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED,
+        ) = old

@@ -259,15 +259,6 @@ class Config:
     TELEGRAM_LIVE_SWITCH_REQUIRE_GATE: bool = _env_bool("TELEGRAM_LIVE_SWITCH_REQUIRE_GATE", True)
     LIVE_SWITCH_MAX_GATE_AGE_SEC: int = _env_int("LIVE_SWITCH_MAX_GATE_AGE_SEC", 86400)
 
-    # ============ Manual one-dollar live order attempt ============
-    # Disabled by default. When enabled, main.py attempts exactly one $1 order
-    # after startup using the same real-order arming gates as normal trading.
-    ONE_DOLLAR_ORDER_ON_START: bool = _env_bool("ONE_DOLLAR_ORDER_ON_START", False)
-    ONE_DOLLAR_ORDER_ASSET: str = _env_str("ONE_DOLLAR_ORDER_ASSET", "BTC").upper()
-    ONE_DOLLAR_ORDER_TIMEFRAME: str = _env_str("ONE_DOLLAR_ORDER_TIMEFRAME", "5m")
-    ONE_DOLLAR_ORDER_SIDE: str = _env_str("ONE_DOLLAR_ORDER_SIDE", "auto").lower()
-    ONE_DOLLAR_ORDER_ALLOW_NEARBY: bool = _env_bool("ONE_DOLLAR_ORDER_ALLOW_NEARBY", False)
-
     # ============ Market / resolution model ============
     MARKET_INTERVAL_SEC: int = 300
     TIE_GOES_TO_UP: bool = True
@@ -306,8 +297,8 @@ class Config:
     COOLDOWN_AFTER_LOSSES_SEC: int = _env_int("COOLDOWN_AFTER_LOSSES_SEC", 1800)
     BLACK_SWAN_THRESHOLD: float = _env_float("BLACK_SWAN_THRESHOLD", 0.012)
     BLACK_SWAN_WINDOW_SEC: int = _env_int("BLACK_SWAN_WINDOW_SEC", 300)
-    MAX_TRADES_PER_DAY: int = _env_int("MAX_TRADES_PER_DAY", 24)
-    MAX_ORDER_ATTEMPTS_PER_DAY: int = _env_int("MAX_ORDER_ATTEMPTS_PER_DAY", 72)
+    MAX_TRADES_PER_DAY: int = _env_int("MAX_TRADES_PER_DAY", 0)
+    MAX_ORDER_ATTEMPTS_PER_DAY: int = _env_int("MAX_ORDER_ATTEMPTS_PER_DAY", 0)
     MAX_DAILY_LOSS_USD: float = _env_float("MAX_DAILY_LOSS_USD", 12.0)
     MAX_DAILY_LOSS_PCT: float = _env_float("MAX_DAILY_LOSS_PCT", 0.12)
     MAX_OPEN_TRADES: int = _env_int("MAX_OPEN_TRADES", 3)
@@ -446,7 +437,7 @@ class Config:
 
     LOTTERY_MODE: bool = _env_bool("LOTTERY_MODE", True)
     LOTTERY_BET_SIZE: float = _env_float("LOTTERY_BET_SIZE", 1.0)
-    LOTTERY_MAX_TRADES_PER_DAY: int = _env_int("LOTTERY_MAX_TRADES_PER_DAY", 5)  # currently documented cap; global caps still apply
+    LOTTERY_MAX_TRADES_PER_DAY: int = _env_int("LOTTERY_MAX_TRADES_PER_DAY", 5)  # strategy-local cap only; global daily caps default to unlimited
     LOTTERY_MAX_DAILY_LOSS_USD: float = _env_float("LOTTERY_MAX_DAILY_LOSS_USD", 5.0)  # documented cap; global caps still apply
     LOTTERY_MIN_SECONDS_LEFT: int = _env_int("LOTTERY_MIN_SECONDS_LEFT", 8)
     LOTTERY_MAX_SECONDS_LEFT: int = _env_int("LOTTERY_MAX_SECONDS_LEFT", 55)
