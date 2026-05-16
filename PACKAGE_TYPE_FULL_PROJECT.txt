@@ -1,0 +1,3 @@
+THIS IS THE FULL PROJECT PACKAGE FOR btc_bot_v15_1_3.
+It is NOT an upgrade-only package and NOT a patch-only package.
+It contains complete source files, tests, config examples, install scripts, README files, and manifests.
