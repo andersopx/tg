@@ -133,6 +133,27 @@ The bot is designed for small-size, frequent 5m/15m markets:
 
 No system can guarantee daily profit or zero losses. The engineering goal is to automate learning/trading/review while keeping real orders behind explicit arming and risk gates.
 
+## Bot research notes and improvement roadmap
+
+Recent Polymarket / prediction-market bot research points to a few repeatable profit models, but each has execution and liquidity limits:
+
+| Profit model | What it tries to earn | Main risk | Fit for this bot |
+| --- | --- | --- | --- |
+| Directional edge | Buy underpriced Up/Down tokens when model probability exceeds market-implied probability after fees and slippage. | Overfitting, stale prices, low fill quality, regime changes. | Current core: Adaptive Edge, Profit Rule, Shadow review, and execution gates. |
+| Market making / liquidity rewards | Quote resting orders around fair value, capture spread, and potentially earn maker rebates / liquidity rewards. | Inventory imbalance, adverse selection, crossed/negative spreads, quote latency. | Future module only after inventory accounting, cancel/replace safety, and quote validation are production-grade. Polymarket docs describe makers as continuously posting bids/asks and warn negative spreads lose money on every fill. Source: https://docs.polymarket.com/market-makers/overview |
+| Rebate-aware making | Provide qualifying liquidity where reward scoring favors tight, balanced depth. | Reward rules can change; shallow markets can create inventory that is hard to exit. | Add as Shadow-only simulator first; Polymarket documents daily maker rebates and liquidity reward scoring. Sources: https://docs.polymarket.com/market-makers/maker-rebates and https://docs.polymarket.com/market-makers/liquidity-rewards |
+| Cross-market / combinatorial arbitrage | Detect mutually exclusive/exhaustive outcome groups priced away from probability sum constraints. | Opportunities are short-lived and size-limited; multi-leg fill risk. | Research-only until the bot can atomically lock both legs or enforce strict partial-fill unwind rules. Academic work reports real Polymarket arbitrage but also scalability and execution constraints. Source: https://arxiv.org/abs/2508.03474 |
+| Latency / stale-price arbitrage | Convert fast external data into implied probability before Polymarket prices update. | Competing low-latency bots, failed fills, stale external signals, regulatory/exchange constraints. | Use only as a quality feature for current 5m/15m directional entries, not a separate aggressive sniper until telemetry proves edge. Source: https://arxiv.org/abs/2604.03888 |
+| AI / ensemble forecasting | Combine multiple model opinions and evaluate calibration before trading. | Hallucination, cost, feedback loops, and poor real-money transfer. | Add model-consensus features to Shadow learning first; live models should pass Brier/log-loss/calibration checks before affecting real sizing. Source: https://arxiv.org/abs/2604.07355 |
+
+Near-term improvements should stay conservative:
+
+1. Keep only the two Telegram runtime modes: Shadow for learning and Real for armed execution.
+2. Expand Shadow analytics before expanding strategy types: per-strategy win rate, average PnL, Brier score, calibration buckets, fill-quality loss, and time-of-window buckets.
+3. Promote rules only after enough resolved Shadow / real samples show positive net PnL after fees, slippage, and failed-fill penalties.
+4. Treat market making as a separate future engine with explicit inventory caps, max quote age, cancel-on-stale, crossed-spread prevention, and Shadow-only dry simulation.
+5. Treat arbitrage as an alert/simulator first unless both legs can be executed safely with bounded partial-fill risk.
+
 
 ## 原文档：`README_V15_1_3.md`
 
