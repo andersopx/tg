@@ -113,6 +113,10 @@ def diagnose_signature_type_balances(db, current_sig, current_balance):
 
     old_sig = config.POLYMARKET_SIGNATURE_TYPE
     old_store = config.STORE_API_CREDS
+    try:
+        old_runtime_sig = db.get_state("polymarket_signature_type", None)
+    except Exception:
+        old_runtime_sig = None
     hits = []
     try:
         config.STORE_API_CREDS = False
@@ -120,7 +124,13 @@ def diagnose_signature_type_balances(db, current_sig, current_balance):
             if int(sig) == int(current_sig):
                 continue
             try:
+                # effective_polymarket_signature_type prefers TG/SQLite runtime
+                # state over .env, so probe both sources to match server behavior.
                 config.POLYMARKET_SIGNATURE_TYPE = int(sig)
+                try:
+                    db.set_state("polymarket_signature_type", int(sig))
+                except Exception:
+                    pass
                 probe = PolymarketClient(db)
                 probe.connect()
                 bal = probe.get_balance()
@@ -131,6 +141,10 @@ def diagnose_signature_type_balances(db, current_sig, current_balance):
     finally:
         config.POLYMARKET_SIGNATURE_TYPE = old_sig
         config.STORE_API_CREDS = old_store
+        try:
+            db.set_state("polymarket_signature_type", old_runtime_sig)
+        except Exception:
+            pass
     return hits
 
 def check_parsed_market(pm, market, expected_window_ts=None):
@@ -169,8 +183,9 @@ def check_parsed_market(pm, market, expected_window_ts=None):
 
 
 async def run_offline_fixture(path: str):
-    errors = check_common_config() + check_packages()
     db = Database(config.DB_PATH)
+    config.attach_runtime_state(db)
+    errors = check_common_config() + check_packages()
     pm = PolymarketClient(db)
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -187,8 +202,9 @@ async def run_offline_fixture(path: str):
 
 
 async def run_online():
-    errors = check_common_config() + check_packages()
     db = Database(config.DB_PATH)
+    config.attach_runtime_state(db)
+    errors = check_common_config() + check_packages()
     ok(f"SQLite initialized: {config.DB_PATH}")
     if db.has_api_creds():
         warn("SQLite api_credentials table contains stored credentials. Run clear_sensitive_data.py --yes")
