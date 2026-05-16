@@ -1,20 +1,18 @@
-# BTC Polymarket Bot v15.1.3
+# BTC Polymarket Bot v15.1.4
 
-Telegram + Polymarket short-cycle automation bot.
+Telegram + Polymarket short-cycle automation bot for BTC/crypto 5m and 15m markets.
 
-This release is a new-install friendly safety patch on the v15.1.1 base.
+This repository is now consolidated around one primary README, one current installer,
+and one current startup path. Historical package manifests and duplicate release notes
+were removed to avoid deploying or reading stale instructions.
 
-- v14.3.2 strategy core: `adaptive_edge_engine.py`, dynamic EV, calibrated probability, 5m/15m support.
-- v15.1.x deployment shell: single `btc-bot` service, duplicate-service stop, `.env` / `btc_bot.db` preservation when present.
-- v15.1.1 live arming fix: `REAL_TRADING_ENABLED` is enforced in code.
-- v15.1.3 packaging fix: release package includes a runnable `.env` file for users who delete old directories before every install.
+## Default safety posture
 
-## Default posture
-
-Brand-new installs create/keep `.env` immediately. It is safe by default:
+Fresh installs are safe by default. The checked-in `.env` and `.env.example` keep real
+orders disabled until you explicitly arm them:
 
 ```env
-MODE=small_live
+MODE=paper
 DRY_RUN=true
 REAL_TRADING_ENABLED=false
 SHADOW_TRADING_ENABLED=true
@@ -22,28 +20,30 @@ CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=false
 POLYMARKET_REPLAY_ON_START=false
 ```
 
-Telegram will only connect after you edit these fields in `.env`:
+Telegram placeholders must be replaced before the Telegram UI can connect:
 
 ```env
 TG_BOT_TOKEN=your_telegram_bot_token_here
 TG_USER_ID=123456789
 ```
 
-`TG_USER_ID` is your personal Telegram numeric user ID. The bot only accepts commands from this ID.
+`TG_USER_ID` must be your personal Telegram numeric user ID; commands from other users
+are rejected.
 
-## Runtime state and credentials
+## Current entry points
 
-For a new install, the package includes `.env` so the runtime directory is complete.
+Use these for normal operation:
 
-For an upgrade, the installer still preserves existing runtime state when it exists:
+- `./start.sh` — one-click runtime gate: preflight, backtest, optional replay, then `main.py`.
+- `sudo bash install_v15_1_3.sh /root/btc_bot_v15_1_3.tar.gz` — current safe installer/upgrader.
+- `bash audit_v15_1_3.sh` — package safety audit and test runner.
 
-- `.env`
-- `btc_bot.db`
-- `btc_bot.db-wal`
-- `btc_bot.db-shm`
-- `bot_state` / `api_credentials` tables when present
+Legacy helpers remain only where tests or upgrade compatibility still require them:
 
-Polymarket trading credentials should still be entered through Telegram where possible. They are stored in SQLite runtime state, not hardcoded into the release package.
+- `install_v15_1_2.sh` — regression compatibility helper.
+- `install_v14_3_2.sh` / `install_ready.sh` — old upgrade path compatibility.
+- `start_high_win_rate.sh` — optional high-win-rate profile wrapper.
+- `start_py311.sh` — Python 3.11-specific wrapper.
 
 ## Install
 
@@ -53,13 +53,11 @@ Upload `btc_bot_v15_1_3.tar.gz` to `/root/`, then run:
 cd /root
 tar -xzf btc_bot_v15_1_3.tar.gz
 cd btc_bot_v15_1_3
-
 sudo bash install_v15_1_3.sh /root/btc_bot_v15_1_3.tar.gz
 ```
 
-The installer defaults to `START_AFTER_INSTALL=false`, so it will not auto-start after install.
-
-Before starting, edit Telegram config:
+The installer defaults to `START_AFTER_INSTALL=false`, so it will not auto-start after
+install. Review `.env` first:
 
 ```bash
 nano /root/btc_bot_v15_1_3/.env
@@ -72,9 +70,22 @@ systemctl restart btc-bot
 journalctl -u btc-bot -f
 ```
 
+## Runtime state and credentials
+
+For upgrades, the installer preserves existing runtime state when present:
+
+- `.env`
+- `btc_bot.db`
+- `btc_bot.db-wal`
+- `btc_bot.db-shm`
+- Telegram/runtime state stored in SQLite
+
+Polymarket trading credentials should be entered through Telegram where possible. They
+are runtime state, not hardcoded release-package content.
+
 ## Live arming rule
 
-Real orders require **all** of these:
+Real orders require all of these to be true:
 
 ```env
 MODE=small_live        # or live
@@ -83,20 +94,22 @@ REAL_TRADING_ENABLED=true
 OBSERVER_ONLY=false
 ```
 
-For signature type 3 / proxy wallet real submission, this must also be intentionally enabled:
+For signature type 3 / proxy wallet real submission, this must also be intentionally
+enabled:
 
 ```env
 CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=true
 ```
 
-## Short-cycle automation goal
+## v15.1.4 safety fixes retained
 
-The bot is designed for small-size, frequent 5m/15m markets:
+- Shadow hard-safety trades are marked `is_shadow=1` so they can settle and feed review/learning.
+- Runtime Telegram overrides are honored by `profit_rule_engine` settings.
+- Profit-rule DB resolution uses `config.DB_PATH` for app-default access and treats invalid explicit DB references as unavailable.
+- `mode="live"` remains an auditable policy request; non-promoted buckets are blocked when live promotion is required.
 
-- Shadow mode collects free learning samples.
-- Adaptive Edge filters candidates by EV and quality.
-- Profit Rule live gate requires promoted rule buckets.
-- Execution gate blocks poor fills, slippage, thin book, and stale markets.
-- Daily profit lock and loss controls reduce downside.
+## Operational goal
 
-No system can guarantee daily profit or zero losses. The engineering goal is to automate learning/trading/review while keeping real orders behind explicit arming and risk gates.
+The bot automates signal generation, shadow learning, risk checks, and review loops.
+No system can guarantee daily profit or zero losses; real orders should stay behind
+explicit arming, backtest/replay checks, and small position sizing.
