@@ -119,8 +119,8 @@ class BinanceFeed:
                         if parsed:
                             self.last_price = parsed[-1].close
                             self.last_update_ts = time.time()
-                        log.info("✅ Binance feed %s bootstrapped %s klines from %s, last price $%,.2f",
-                                 self.symbol, len(self.klines), url, self.last_price)
+                        log.info("✅ Binance feed %s bootstrapped %s klines from %s, last price $%s",
+                                 self.symbol, len(self.klines), url, f"{self.last_price:,.2f}")
                         return
                 except Exception as e:
                     errors.append(f"{url} error={e}")
