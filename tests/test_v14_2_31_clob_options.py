@@ -39,12 +39,13 @@ def test_place_buy_order_supports_sdk_that_requires_options_attributes(monkeypat
     monkeypatch.setattr(pm, "OrderType", FakeOrderType)
     monkeypatch.setattr(pm, "BUY", "BUY")
 
-    old = (config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY)
+    old = (config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY, config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED)
     try:
         config.MODE = "small_live"
         config.DRY_RUN = False
         config.REAL_TRADING_ENABLED = True
         config.OBSERVER_ONLY = False
+        config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED = True
         client = PolymarketClient(DummyDB())
         client.client = FakeSdk()
         resp = client.place_buy_order(
@@ -57,7 +58,7 @@ def test_place_buy_order_supports_sdk_that_requires_options_attributes(monkeypat
             neg_risk=False,
         )
     finally:
-        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY = old
+        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY, config.CLOB_V2_SIG3_REAL_SUBMIT_ENABLED = old
 
     assert calls["tick_size"] == "0.01"
     assert resp["success"] is True

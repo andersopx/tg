@@ -232,7 +232,7 @@ class Config:
     # ============ Polymarket API ============
     POLYMARKET_PRIVATE_KEY: str = os.getenv("POLYMARKET_PRIVATE_KEY", "")
     POLYMARKET_FUNDER: str = os.getenv("POLYMARKET_FUNDER", "")
-    POLYMARKET_SIGNATURE_TYPE: int = _env_int("POLYMARKET_SIGNATURE_TYPE", 1)
+    POLYMARKET_SIGNATURE_TYPE: int = _env_int("POLYMARKET_SIGNATURE_TYPE", 3)
     POLYMARKET_HOST: str = os.getenv("POLYMARKET_HOST", "https://clob.polymarket.com")
     POLYMARKET_GAMMA: str = os.getenv("POLYMARKET_GAMMA", "https://gamma-api.polymarket.com")
     POLYMARKET_DATA_API: str = os.getenv("POLYMARKET_DATA_API", "https://data-api.polymarket.com")

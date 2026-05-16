@@ -95,6 +95,44 @@ def check_packages():
     return errors
 
 
+
+def diagnose_signature_type_balances(db, current_sig, current_balance):
+    """Best-effort auth diagnostic for Polymarket proxy/deposit wallet modes.
+
+    A common setup mistake is using signature_type=1 for a deposit/proxy wallet
+    that actually needs signature_type=3. The CLOB API may authenticate but show
+    a zero collateral balance, which looks like an empty account. Try the other
+    signature modes in dry-run preflight and report if one sees funds.
+    """
+    try:
+        cur_bal = float(current_balance or 0.0)
+    except Exception:
+        cur_bal = 0.0
+    if cur_bal > 0 or not config.has_polymarket_creds:
+        return []
+
+    old_sig = config.POLYMARKET_SIGNATURE_TYPE
+    old_store = config.STORE_API_CREDS
+    hits = []
+    try:
+        config.STORE_API_CREDS = False
+        for sig in (0, 1, 2, 3):
+            if int(sig) == int(current_sig):
+                continue
+            try:
+                config.POLYMARKET_SIGNATURE_TYPE = int(sig)
+                probe = PolymarketClient(db)
+                probe.connect()
+                bal = probe.get_balance()
+                if bal is not None and float(bal) > 0:
+                    hits.append((sig, float(bal)))
+            except Exception:
+                continue
+    finally:
+        config.POLYMARKET_SIGNATURE_TYPE = old_sig
+        config.STORE_API_CREDS = old_store
+    return hits
+
 def check_parsed_market(pm, market, expected_window_ts=None):
     # type: (PolymarketClient, dict, Optional[int]) -> int
     errors = 0
@@ -195,7 +233,11 @@ async def run_online():
                     errors += 1
                     fail("Authenticated balance unavailable")
             else:
-                ok(f"Authenticated CLOB connection OK, collateral balance≈${bal:.2f}")
+                ok(f"Authenticated CLOB connection OK, collateral balance≈${bal:.2f} (signature_type={config.effective_polymarket_signature_type})")
+                sig_hits = diagnose_signature_type_balances(db, config.effective_polymarket_signature_type, bal)
+                if sig_hits:
+                    best_sig, best_bal = max(sig_hits, key=lambda x: x[1])
+                    warn(f"Configured signature_type reads zero, but signature_type={best_sig} sees collateral≈${best_bal:.2f}. Update POLYMARKET_SIGNATURE_TYPE/TG 签名类型 to {best_sig}.")
                 if config.DRY_RUN:
                     ok("Authenticated dry-run confirmed: credentials work, but DRY_RUN=true blocks order submission")
         except Exception as e:
