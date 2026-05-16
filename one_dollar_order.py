@@ -188,43 +188,55 @@ def record_matched_trade(db: Database, candidate: OrderCandidate, market: dict, 
     })
 
 
-async def run(args: argparse.Namespace) -> int:
-    db = Database(config.DB_PATH)
-    load_runtime_overrides(db)
-    pm = PolymarketClient(db)
+async def attempt_one_dollar_order(
+    db: Database,
+    pm: PolymarketClient,
+    *,
+    asset: str = "BTC",
+    timeframe: str = "5m",
+    side: str = "auto",
+    window_ts: int = 0,
+    allow_nearby: bool = False,
+    order_type: Optional[str] = None,
+    submit: bool = False,
+    connect_for_submit: bool = False,
+) -> dict:
+    """Preview or submit one $1 order using an already-initialized Polymarket client.
 
-    asset = str(args.asset or "BTC").upper()
-    timeframe = config.timeframe_slug(args.timeframe)
-    window_ts = int(args.window_ts or current_window_ts(None, timeframe))
+    ``submit=False`` only inspects the public market/orderbook and returns a
+    candidate. ``submit=True`` continues through the live arming, balance and
+    post_order path. The caller owns public/auth connection setup. The CLI passes
+    ``connect_for_submit=True`` so it can preview with public endpoints first and
+    authenticate only after the operator has supplied ``--yes``. The backend
+    startup hook passes the already-authenticated client and leaves this false.
+    """
+    asset = str(asset or "BTC").upper()
+    timeframe = config.timeframe_slug(timeframe)
+    window_ts = int(window_ts or current_window_ts(None, timeframe))
+    order_type = str(order_type or config.ORDER_TYPE).upper()
 
-    # Discovery and preview are intentionally public-only; do not derive API keys
-    # or touch authenticated endpoints until after --yes and all arming gates pass.
-    pm.connect_public()
-
-    market = await pm.find_updown_market(asset, window_ts, timeframe, allow_nearby=bool(args.allow_nearby))
+    market = await pm.find_updown_market(asset, window_ts, timeframe, allow_nearby=bool(allow_nearby))
     if not market:
-        print(json.dumps({"ok": False, "error": "market_not_found", "asset": asset, "timeframe": timeframe, "window_ts": window_ts}, ensure_ascii=False, indent=2))
-        return 2
+        return {"ok": False, "submitted": False, "error": "market_not_found", "asset": asset, "timeframe": timeframe, "window_ts": window_ts}
 
-    candidate = choose_candidate(pm, market, asset=asset, timeframe=timeframe, window_ts=window_ts, side=args.side)
-    preview = {
+    candidate = choose_candidate(pm, market, asset=asset, timeframe=timeframe, window_ts=window_ts, side=side)
+    result = {
         "ok": True,
         "submitted": False,
         "mode": config.mode_display,
         "real_orders_enabled": bool(config.real_orders_enabled),
         "amount_usd": ONE_DOLLAR_AMOUNT,
-        "order_type": str(args.order_type or config.ORDER_TYPE).upper(),
+        "order_type": order_type,
         "candidate": asdict(candidate),
-        "safety_note": "preview only; add --yes and enable all live arming switches to submit exactly one $1 order",
+        "safety_note": "preview only unless submit=True/--yes and all live arming switches pass",
     }
 
-    if not args.yes:
-        print(json.dumps(preview, ensure_ascii=False, indent=2))
-        return 0
+    if not submit:
+        return result
 
     guard_reason = pm.real_submit_guard_reason()
     if not config.real_orders_enabled or guard_reason:
-        preview.update({
+        result.update({
             "ok": False,
             "error": guard_reason or "real_orders_disabled",
             "arming_required": {
@@ -235,15 +247,15 @@ async def run(args: argparse.Namespace) -> int:
                 "CLOB_V2_SIG3_REAL_SUBMIT_ENABLED": "true when using signature_type=3 and you intentionally accept that submit path",
             },
         })
-        print(json.dumps(preview, ensure_ascii=False, indent=2))
-        return 3
+        return result
 
-    pm.connect()
+    if connect_for_submit:
+        pm.connect()
+
     balance = pm.get_balance()
     if balance is None or float(balance) < ONE_DOLLAR_AMOUNT:
-        preview.update({"ok": False, "error": "insufficient_or_unavailable_balance", "balance": balance})
-        print(json.dumps(preview, ensure_ascii=False, indent=2))
-        return 4
+        result.update({"ok": False, "error": "insufficient_or_unavailable_balance", "balance": balance})
+        return result
 
     db.mark_order_attempt(candidate.window_ts, candidate.market_slug, status="submitting", reason="manual_one_dollar_attempt", asset=asset, timeframe=timeframe)
     response = pm.place_buy_order(
@@ -251,7 +263,7 @@ async def run(args: argparse.Namespace) -> int:
         candidate.best_ask,
         candidate.estimated_shares,
         ONE_DOLLAR_AMOUNT,
-        str(args.order_type or config.ORDER_TYPE).upper(),
+        order_type,
         candidate.tick_size,
         candidate.neg_risk,
     ) or {}
@@ -259,11 +271,41 @@ async def run(args: argparse.Namespace) -> int:
     order_id = response.get("orderID") or response.get("id") or ""
     db.mark_order_attempt(candidate.window_ts, candidate.market_slug, order_id=order_id, status=status, reason="manual_one_dollar_attempt_response", asset=asset, timeframe=timeframe)
 
-    result = {"ok": bool(response.get("success")), "submitted": True, "candidate": asdict(candidate), "response": response}
+    result.update({"ok": bool(response.get("success")), "submitted": True, "response": response})
     if status == "matched":
         result["trade_id"] = record_matched_trade(db, candidate, market, response)
+    return result
+
+
+async def run(args: argparse.Namespace) -> int:
+    db = Database(config.DB_PATH)
+    load_runtime_overrides(db)
+    pm = PolymarketClient(db)
+
+    # Discovery and preview are intentionally public-only; do not derive API keys
+    # or touch authenticated endpoints until after --yes and all arming gates pass.
+    pm.connect_public()
+
+    try:
+        result = await attempt_one_dollar_order(
+            db, pm,
+            asset=args.asset, timeframe=args.timeframe, side=args.side, window_ts=args.window_ts,
+            allow_nearby=bool(args.allow_nearby), order_type=args.order_type, submit=bool(args.yes), connect_for_submit=bool(args.yes),
+        )
+    except Exception as e:
+        log.error("one-dollar order helper failed: %s", e)
+        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False, indent=2))
+        return 1
+
+    if not args.yes and result.get("error") in {"real_orders_disabled", "clob_v2_signature_type_3_signer_guard", "clob_v2_sdk_required"}:
+        # Preview mode should still be a successful dry inspection; leave the
+        # arming failure visible but do not force a non-zero shell status.
+        result["ok"] = True
+        result["error"] = "preview_only"
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if response.get("success") else 5
+    if not args.yes:
+        return 0 if result.get("candidate") else 2
+    return 0 if result.get("ok") and result.get("submitted") else 5
 
 
 def build_parser() -> argparse.ArgumentParser:

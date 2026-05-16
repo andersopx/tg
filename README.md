@@ -124,6 +124,17 @@ To submit one real $1 FOK/FAK BUY, first enable every live arming switch above a
 python3 one_dollar_order.py --asset BTC --timeframe 5m --side auto --yes
 ```
 
+If you want the backend service itself to try one real $1 order immediately after startup, add these explicit settings before restarting the service:
+
+```env
+ONE_DOLLAR_ORDER_ON_START=true
+ONE_DOLLAR_ORDER_ASSET=BTC
+ONE_DOLLAR_ORDER_TIMEFRAME=5m
+ONE_DOLLAR_ORDER_SIDE=auto
+```
+
+The startup hook runs once per process start. If any live arming switch or the signature-type-3 submit guard is still off, the log will show `One-dollar startup order did not submit` with the exact blocking reason.
+
 Safety behavior:
 
 - The amount is fixed at `$1.00`; it uses `MIN_MARKET_ORDER_USD=1.0` and the configured `ORDER_TYPE` unless `--order-type FOK|FAK` is supplied.

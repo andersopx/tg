@@ -259,6 +259,15 @@ class Config:
     TELEGRAM_LIVE_SWITCH_REQUIRE_GATE: bool = _env_bool("TELEGRAM_LIVE_SWITCH_REQUIRE_GATE", True)
     LIVE_SWITCH_MAX_GATE_AGE_SEC: int = _env_int("LIVE_SWITCH_MAX_GATE_AGE_SEC", 86400)
 
+    # ============ Manual one-dollar live order attempt ============
+    # Disabled by default. When enabled, main.py attempts exactly one $1 order
+    # after startup using the same real-order arming gates as normal trading.
+    ONE_DOLLAR_ORDER_ON_START: bool = _env_bool("ONE_DOLLAR_ORDER_ON_START", False)
+    ONE_DOLLAR_ORDER_ASSET: str = _env_str("ONE_DOLLAR_ORDER_ASSET", "BTC").upper()
+    ONE_DOLLAR_ORDER_TIMEFRAME: str = _env_str("ONE_DOLLAR_ORDER_TIMEFRAME", "5m")
+    ONE_DOLLAR_ORDER_SIDE: str = _env_str("ONE_DOLLAR_ORDER_SIDE", "auto").lower()
+    ONE_DOLLAR_ORDER_ALLOW_NEARBY: bool = _env_bool("ONE_DOLLAR_ORDER_ALLOW_NEARBY", False)
+
     # ============ Market / resolution model ============
     MARKET_INTERVAL_SEC: int = 300
     TIE_GOES_TO_UP: bool = True

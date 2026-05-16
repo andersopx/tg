@@ -75,3 +75,134 @@ def test_choose_candidate_rejects_insufficient_liquidity(monkeypatch):
         assert "insufficient ask liquidity" in str(e)
     else:
         raise AssertionError("expected insufficient liquidity error")
+
+
+def test_attempt_one_dollar_order_submits_when_live_gates_enabled(monkeypatch):
+    import asyncio
+    from one_dollar_order import attempt_one_dollar_order
+
+    class FakeDB:
+        def __init__(self):
+            self.attempts = []
+            self.trades = []
+
+        def mark_order_attempt(self, *args, **kwargs):
+            self.attempts.append((args, kwargs))
+
+        def insert_trade(self, trade):
+            self.trades.append(trade)
+            return 101
+
+    class FakePM(FakePolymarket):
+        async def find_updown_market(self, asset, window_ts, timeframe, allow_nearby=False):
+            return {
+                "slug": f"{asset.lower()}-updown-{timeframe}-{window_ts}",
+                "up_token_id": "up-token",
+                "down_token_id": "down-token",
+                "tick_size": 0.01,
+            }
+
+        def real_submit_guard_reason(self):
+            return ""
+
+        def get_balance(self):
+            return 10.0
+
+        def place_buy_order(self, *args, **kwargs):
+            self.posted = (args, kwargs)
+            return {"success": True, "status": "matched", "orderID": "0xmanual", "filled_cost": 1.0, "filled_shares": 4.0, "avg_price": 0.25}
+
+    old = (config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY)
+    try:
+        config.MODE = "small_live"
+        config.DRY_RUN = False
+        config.REAL_TRADING_ENABLED = True
+        config.OBSERVER_ONLY = False
+        db = FakeDB()
+        pm = FakePM({
+            "up-token": {"best_ask": 0.25, "best_bid": 0.24, "asks": [(0.25, 10.0)]},
+            "down-token": {"best_ask": 0.50, "best_bid": 0.49, "asks": [(0.50, 10.0)]},
+        })
+
+        result = asyncio.run(attempt_one_dollar_order(db, pm, asset="BTC", timeframe="5m", side="auto", window_ts=1710000000, submit=True))
+    finally:
+        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY = old
+
+    assert result["ok"] is True
+    assert result["submitted"] is True
+    assert result["trade_id"] == 101
+    assert pm.posted[0][3] == 1.0
+    assert db.trades[0]["status"] == "filled"
+
+
+def test_attempt_one_dollar_order_does_not_post_when_live_gates_disabled(monkeypatch):
+    import asyncio
+    from one_dollar_order import attempt_one_dollar_order
+
+    class FakeDB:
+        def mark_order_attempt(self, *args, **kwargs):
+            raise AssertionError("should not mark order attempts before live gates pass")
+
+    class FakePM(FakePolymarket):
+        async def find_updown_market(self, asset, window_ts, timeframe, allow_nearby=False):
+            return {"slug": "btc-updown-5m-1710000000", "up_token_id": "up-token", "down_token_id": "down-token", "tick_size": 0.01}
+
+        def real_submit_guard_reason(self):
+            return ""
+
+        def place_buy_order(self, *args, **kwargs):
+            raise AssertionError("should not post when real_orders_enabled is false")
+
+    old = (config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY)
+    try:
+        config.MODE = "paper"
+        config.DRY_RUN = True
+        config.REAL_TRADING_ENABLED = False
+        config.OBSERVER_ONLY = False
+        pm = FakePM({
+            "up-token": {"best_ask": 0.25, "best_bid": 0.24, "asks": [(0.25, 10.0)]},
+            "down-token": {"best_ask": 0.50, "best_bid": 0.49, "asks": [(0.50, 10.0)]},
+        })
+        result = asyncio.run(attempt_one_dollar_order(FakeDB(), pm, asset="BTC", timeframe="5m", side="up", window_ts=1710000000, submit=True))
+    finally:
+        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY = old
+
+    assert result["ok"] is False
+    assert result["submitted"] is False
+    assert result["error"] == "real_orders_disabled"
+
+
+def test_attempt_one_dollar_order_preview_never_posts_even_when_live_enabled():
+    import asyncio
+    from one_dollar_order import attempt_one_dollar_order
+
+    class FakePM(FakePolymarket):
+        async def find_updown_market(self, asset, window_ts, timeframe, allow_nearby=False):
+            return {"slug": "btc-updown-5m-1710000000", "up_token_id": "up-token", "down_token_id": "down-token", "tick_size": 0.01}
+
+        def real_submit_guard_reason(self):
+            raise AssertionError("preview should not check submit guards")
+
+        def get_balance(self):
+            raise AssertionError("preview should not check balance")
+
+        def place_buy_order(self, *args, **kwargs):
+            raise AssertionError("preview should not post orders")
+
+    old = (config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY)
+    try:
+        config.MODE = "small_live"
+        config.DRY_RUN = False
+        config.REAL_TRADING_ENABLED = True
+        config.OBSERVER_ONLY = False
+        pm = FakePM({
+            "up-token": {"best_ask": 0.25, "best_bid": 0.24, "asks": [(0.25, 10.0)]},
+            "down-token": {"best_ask": 0.50, "best_bid": 0.49, "asks": [(0.50, 10.0)]},
+        })
+        result = asyncio.run(attempt_one_dollar_order(object(), pm, asset="BTC", timeframe="5m", side="auto", window_ts=1710000000, submit=False))
+    finally:
+        config.MODE, config.DRY_RUN, config.REAL_TRADING_ENABLED, config.OBSERVER_ONLY = old
+
+    assert result["ok"] is True
+    assert result["submitted"] is False
+    assert result["candidate"]["outcome"] == "Up"
