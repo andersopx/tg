@@ -20,7 +20,7 @@ CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=false
 POLYMARKET_REPLAY_ON_START=false
 ```
 
-Telegram placeholders must be replaced before the Telegram UI can connect:
+Telegram placeholders must be replaced in your local `.env` before the Telegram UI can connect:
 
 ```env
 TG_BOT_TOKEN=your_telegram_bot_token_here
@@ -28,7 +28,8 @@ TG_USER_ID=123456789
 ```
 
 `TG_USER_ID` must be your personal Telegram numeric user ID; commands from other users
-are rejected.
+are rejected. Never commit a real Telegram bot token; `.env` is ignored and `.env.example`
+keeps only placeholders.
 
 ## Current entry points
 

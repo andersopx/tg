@@ -190,13 +190,8 @@ elif [[ -d "$BACKUP_DIR/target_before_install" ]]; then
 fi
 
 if [[ ! -f "$APP_DIR/.env" ]]; then
-  if [[ -f "$SRC_ROOT/.env" ]]; then
-    cp "$SRC_ROOT/.env" "$APP_DIR/.env"
-    log "新安装：已使用包内 .env 创建运行配置。请填写 TG_BOT_TOKEN / TG_USER_ID。"
-  else
-    cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-    log "新安装：已从 .env.example 创建安全 .env。请填写 TG_BOT_TOKEN / TG_USER_ID。"
-  fi
+  cp "$APP_DIR/.env.example" "$APP_DIR/.env"
+  log "新安装：已从 .env.example 创建安全 .env。请填写 TG_BOT_TOKEN / TG_USER_ID。"
 fi
 
 # New-install sanity hints. Do not fail here because the user may fill TG later.
