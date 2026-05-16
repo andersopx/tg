@@ -110,6 +110,27 @@ For signature type 3 / proxy wallet real submission, this must also be intention
 CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=true
 ```
 
+## Manual one-dollar order attempt
+
+Use `one_dollar_order.py` when you want to test the live CLOB submit path with exactly **$1.00** without waiting for the strategy loop. The command previews by default and does **not** submit unless `--yes` is present:
+
+```bash
+python3 one_dollar_order.py --asset BTC --timeframe 5m --side auto
+```
+
+To submit one real $1 FOK/FAK BUY, first enable every live arming switch above and confirm wallet credentials/balance, then run:
+
+```bash
+python3 one_dollar_order.py --asset BTC --timeframe 5m --side auto --yes
+```
+
+Safety behavior:
+
+- The amount is fixed at `$1.00`; it uses `MIN_MARKET_ORDER_USD=1.0` and the configured `ORDER_TYPE` unless `--order-type FOK|FAK` is supplied.
+- `--side auto` chooses the cheaper visible Up/Down ask; you can force `--side up` or `--side down`.
+- The script still refuses to submit unless `MODE=small_live|live`, `DRY_RUN=false`, `REAL_TRADING_ENABLED=true`, and `OBSERVER_ONLY=false`.
+- If a manual order is matched, it is inserted into `trades` with `status='filled'` so normal settlement can track it.
+
 ## Short-cycle automation goal
 
 The bot is designed for small-size, frequent 5m/15m markets:
