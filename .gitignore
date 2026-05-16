@@ -1,0 +1,19 @@
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local runtime state and secrets
+.env
+.env.*
+!.env.example
+!.env.high_win_rate.example
+btc_bot.db
+btc_bot.db-*
+*.sqlite
+*.sqlite3
+
+# Generated analysis/backtest outputs
+backtest_results/
+polymarket_replay_results/
+*.log

@@ -1,47 +1,5 @@
 import asyncio
-import sys
 import tempfile
-import types
-
-# The deployment installs python-telegram-bot, but the offline test runner may not.
-# Stub only the tiny surface needed to import telegram_bot.py.
-if "telegram" not in sys.modules:
-    telegram_stub = types.ModuleType("telegram")
-
-    class InlineKeyboardButton:
-        def __init__(self, text, callback_data=None):
-            self.text = text
-            self.callback_data = callback_data
-
-    class InlineKeyboardMarkup:
-        def __init__(self, inline_keyboard):
-            self.inline_keyboard = inline_keyboard
-
-    telegram_stub.Update = object
-    telegram_stub.InlineKeyboardButton = InlineKeyboardButton
-    telegram_stub.InlineKeyboardMarkup = InlineKeyboardMarkup
-    sys.modules["telegram"] = telegram_stub
-
-if "telegram.ext" not in sys.modules:
-    ext_stub = types.ModuleType("telegram.ext")
-
-    class _Builder:
-        def token(self, token):
-            return self
-
-        def build(self):
-            return object()
-
-    class Application:
-        @classmethod
-        def builder(cls):
-            return _Builder()
-
-    ext_stub.Application = Application
-    ext_stub.CommandHandler = object
-    ext_stub.CallbackQueryHandler = object
-    ext_stub.ContextTypes = types.SimpleNamespace(DEFAULT_TYPE=object)
-    sys.modules["telegram.ext"] = ext_stub
 
 from config import config
 from database import Database
