@@ -294,7 +294,15 @@ def signature_relaxed(x: Dict[str, Any]) -> str:
 # ------------------------- database -------------------------
 
 def _connect_from_db(db: Any) -> Tuple[Optional[sqlite3.Connection], bool]:
-    """Return (conn, should_close)."""
+    """Return (conn, should_close).
+
+    ``db=None`` means "use the configured application database".  A non-None
+    object means the caller intentionally supplied a database handle/reference; if
+    it does not expose a usable connection/path, treat it as unavailable instead
+    of silently falling back to ``config.DB_PATH``.  This keeps live safety checks
+    auditable and prevents unrelated runtime files from changing a caller's
+    decision path.
+    """
     if db is None:
         _path = _config_db_path()
         if os.path.exists(_path):
@@ -308,9 +316,6 @@ def _connect_from_db(db: Any) -> Tuple[Optional[sqlite3.Connection], bool]:
         p = getattr(db, attr, None)
         if p and os.path.exists(str(p)):
             return sqlite3.connect(str(p), timeout=3.0), True
-    _path = _config_db_path()
-    if os.path.exists(_path):
-        return sqlite3.connect(_path, timeout=3.0), True
     return None, False
 
 
@@ -668,9 +673,11 @@ def profit_rule_decision(db: Any, signal: Any, asset: str, timeframe: str, direc
         live_mode = str(mode).lower() == "live"
 
         # Live safety invariant: when PROFIT_RULE_LIVE_REQUIRE_PROMOTE=true, only
-        # PROMOTE buckets may reach real order submission. NEW/SHADOW/OBSERVE buckets
-        # are allowed to keep learning only in shadow mode.
-        # v15.1.3: PROMOTE-only blocking applies only to REAL order submission.
+        # PROMOTE buckets may be allowed for a live-mode decision.  Do not downgrade
+        # a caller-requested live decision to shadow just because process-level real
+        # trading flags are currently disabled; this function is the last auditable
+        # pre-trade policy gate, and callers/tests depend on mode="live" meaning
+        # "real order authorization requested".
         effective_live_mode = bool(
             live_mode
             and _env_bool("REAL_TRADING_ENABLED", False)
@@ -678,13 +685,7 @@ def profit_rule_decision(db: Any, signal: Any, asset: str, timeframe: str, direc
         )
         info["effective_live_mode"] = effective_live_mode
 
-        # v15.1.3: Trader may pass mode="live" after DRY_RUN=false, but when
-        # REAL_TRADING_ENABLED=false this is shadow-learning mode.
-        if (not effective_live_mode) and str(mode).lower() == "live" and _env_bool("SHADOW_TRADING_ENABLED", True):
-            mode = "shadow"
-            info["normalized_mode"] = "shadow"
-
-        if effective_live_mode and cfg["live_require_promote"] and rating != "PROMOTE":
+        if live_mode and cfg["live_require_promote"] and rating != "PROMOTE":
             _log_event(conn, action="blocked", mode=mode, reason="profit_rule_not_promoted_for_live", x=x, exact=exact, relaxed=relaxed, rating=rating, details=info)
             info["decision"] = "SHADOW_ONLY"
             return False, "profit_rule_not_promoted_for_live", info

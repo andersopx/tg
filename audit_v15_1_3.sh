@@ -8,7 +8,8 @@ fail() { echo "[FAIL] $*" >&2; exit 1; }
 [[ -f config.py ]] || fail "config.py missing"
 [[ -f install_v15_1_3.sh ]] || fail "install_v15_1_3.sh missing"
 [[ -f .env.example ]] || fail ".env.example missing"
-[[ -f .env ]] || fail "release package must include runnable .env for fresh installs"
+# Real operator secrets live in local .env, which is intentionally git-ignored.
+# Fresh installs create .env from .env.example.
 
 python -m compileall -q .
 pytest -q
@@ -16,16 +17,15 @@ pytest -q
 grep -q 'REAL_TRADING_ENABLED: bool = _env_bool("REAL_TRADING_ENABLED", False)' config.py || fail "REAL_TRADING_ENABLED not defined safely"
 grep -q 'bool(self.REAL_TRADING_ENABLED)' config.py || fail "REAL_TRADING_ENABLED not used in real_orders_enabled"
 grep -q 'POLYMARKET_REPLAY_ON_START: bool = _env_bool("POLYMARKET_REPLAY_ON_START", False)' config.py || fail "replay default not false"
-grep -q 'cp "$SRC_ROOT/.env" "$APP_DIR/.env"' install_v15_1_3.sh || fail "installer must use package .env for fresh installs"
+grep -q 'cp "$APP_DIR/.env.example" "$APP_DIR/.env"' install_v15_1_3.sh || fail "installer must create .env from .env.example for fresh installs"
 
-for f in .env .env.example; do
-  grep -q '^DRY_RUN=true$' "$f" || fail "$f must default DRY_RUN=true"
-  grep -q '^REAL_TRADING_ENABLED=false$' "$f" || fail "$f must default REAL_TRADING_ENABLED=false"
-  grep -q '^CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=false$' "$f" || fail "$f must default sig3 real submit=false"
-  grep -q '^POLYMARKET_REPLAY_ON_START=false$' "$f" || fail "$f must default replay=false"
-  grep -q '^TG_BOT_TOKEN=your_telegram_bot_token_here$' "$f" || fail "$f must contain TG_BOT_TOKEN placeholder"
-  grep -q '^TG_USER_ID=123456789$' "$f" || fail "$f must contain TG_USER_ID placeholder"
-done
+f=.env.example
+grep -q '^DRY_RUN=true$' "$f" || fail "$f must default DRY_RUN=true"
+grep -q '^REAL_TRADING_ENABLED=false$' "$f" || fail "$f must default REAL_TRADING_ENABLED=false"
+grep -q '^CLOB_V2_SIG3_REAL_SUBMIT_ENABLED=false$' "$f" || fail "$f must default sig3 real submit=false"
+grep -q '^POLYMARKET_REPLAY_ON_START=false$' "$f" || fail "$f must default replay=false"
+grep -q '^TG_BOT_TOKEN=your_telegram_bot_token_here$' "$f" || fail "$f must contain TG_BOT_TOKEN placeholder"
+grep -q '^TG_USER_ID=123456789$' "$f" || fail "$f must contain TG_USER_ID placeholder"
 
 # Exclude .env placeholders from secret scan, but scan all source/scripts for accidental real keys.
 if grep -R -I --exclude='*.pyc' --exclude='*.pyo' --exclude='*.md' --exclude='.env' --exclude='.env.example' --exclude='.env.high_win_rate.example' -E '0x[a-fA-F0-9]{64}|[0-9]{8,}:[A-Za-z0-9_-]{30,}' . >/tmp/btc_bot_v15_1_3_secret_scan.txt; then

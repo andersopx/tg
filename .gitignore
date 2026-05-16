@@ -1,0 +1,25 @@
+# Runtime secrets / local operator config
+.env
+.env.*
+!.env.example
+
+# Runtime databases and local state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+backtest_cache/
+backtest_reports/
+
+# Python/cache artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local logs / temp files
+*.log
+*.tmp
